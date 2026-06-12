@@ -3,7 +3,7 @@ import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
 import { DevControls } from './components/DevControls'
 import { VoicePanel } from './components/VoicePanel'
-import { getActionFeedback } from './domain/feedback'
+import { getActionFeedback, getBatchFeedback } from './domain/feedback'
 import {
   drawingReducer,
   initialDrawingState,
@@ -80,6 +80,20 @@ function App() {
       setFeedbackMessage('思考中...')
 
       routeCommands(transcript).then((actions) => {
+        if (actions.length > 1) {
+          actions.forEach((action) => dispatch(action))
+          const message = getBatchFeedback(actions, transcript)
+          setFeedbackMessage(message)
+          speechFeedback.speak(message, {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) {
+                speech.resumeListening()
+              }
+            },
+          })
+          return
+        }
+
         executeBatch(actions, 0)
       })
 

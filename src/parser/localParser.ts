@@ -1,3 +1,4 @@
+import type { DrawingAction } from '../domain/actions'
 import type { Shape } from '../domain/shapes'
 import type { LocalParserExample, LocalParserOptions, ParseResult } from './parserTypes'
 
@@ -12,6 +13,10 @@ const COLOR_MAP = [
 ] as const
 
 export const LOCAL_PARSER_EXAMPLES: LocalParserExample[] = [
+  { input: '给我画一个太阳', expectedActionType: 'add_shape' },
+  { input: '画一个笑脸', expectedActionType: 'add_shape' },
+  { input: '画一棵树', expectedActionType: 'add_shape' },
+  { input: '画一座房子', expectedActionType: 'add_shape' },
   { input: '画一个红色圆形', expectedActionType: 'add_shape' },
   { input: '画一个绿色椭圆', expectedActionType: 'add_shape' },
   { input: '画一个黄色三角形', expectedActionType: 'add_shape' },
@@ -113,6 +118,116 @@ function createTextShape(id: string, text: string, color: string): Shape {
     fill: color,
     fontSize: 36,
   }
+}
+
+function createAddShapeAction(
+  shape: Shape,
+  rawText: string,
+  createdAt: string,
+): DrawingAction {
+  return {
+    type: 'add_shape',
+    rawText,
+    parseSource: 'local',
+    createdAt,
+    shape,
+  }
+}
+
+function createSunShapes(createId: () => string): Shape[] {
+  const centerX = 610
+  const centerY = 120
+  const color = '#eab308'
+
+  return [
+    {
+      id: createId(),
+      type: 'circle',
+      x: centerX,
+      y: centerY,
+      radius: 46,
+      fill: color,
+      stroke: color,
+      lineWidth: 4,
+    },
+    { id: createId(), type: 'line', x1: centerX, y1: 48, x2: centerX, y2: 22, stroke: color, lineWidth: 5 },
+    { id: createId(), type: 'line', x1: centerX, y1: 192, x2: centerX, y2: 218, stroke: color, lineWidth: 5 },
+    { id: createId(), type: 'line', x1: 538, y1: centerY, x2: 512, y2: centerY, stroke: color, lineWidth: 5 },
+    { id: createId(), type: 'line', x1: 682, y1: centerY, x2: 708, y2: centerY, stroke: color, lineWidth: 5 },
+    { id: createId(), type: 'line', x1: 560, y1: 70, x2: 540, y2: 50, stroke: color, lineWidth: 5 },
+    { id: createId(), type: 'line', x1: 660, y1: 70, x2: 680, y2: 50, stroke: color, lineWidth: 5 },
+    { id: createId(), type: 'line', x1: 560, y1: 170, x2: 540, y2: 190, stroke: color, lineWidth: 5 },
+    { id: createId(), type: 'line', x1: 660, y1: 170, x2: 680, y2: 190, stroke: color, lineWidth: 5 },
+  ]
+}
+
+function createSmileShapes(createId: () => string): Shape[] {
+  return [
+    { id: createId(), type: 'circle', x: 400, y: 250, radius: 105, fill: '#eab308', stroke: '#111827', lineWidth: 4 },
+    { id: createId(), type: 'circle', x: 360, y: 220, radius: 12, fill: '#111827', stroke: '#111827', lineWidth: 3 },
+    { id: createId(), type: 'circle', x: 440, y: 220, radius: 12, fill: '#111827', stroke: '#111827', lineWidth: 3 },
+    {
+      id: createId(),
+      type: 'polygon',
+      points: [
+        { x: 345, y: 285 },
+        { x: 380, y: 318 },
+        { x: 420, y: 318 },
+        { x: 455, y: 285 },
+        { x: 400, y: 338 },
+      ],
+      fill: '#ef4444',
+      stroke: '#111827',
+      lineWidth: 3,
+    },
+  ]
+}
+
+function createTreeShapes(createId: () => string): Shape[] {
+  return [
+    { id: createId(), type: 'rect', x: 372, y: 285, width: 56, height: 135, fill: '#92400e', stroke: '#111827', lineWidth: 4 },
+    { id: createId(), type: 'ellipse', x: 400, y: 225, radiusX: 105, radiusY: 82, fill: '#22c55e', stroke: '#111827', lineWidth: 4 },
+    { id: createId(), type: 'circle', x: 342, y: 250, radius: 52, fill: '#22c55e', stroke: '#111827', lineWidth: 3 },
+    { id: createId(), type: 'circle', x: 458, y: 250, radius: 52, fill: '#22c55e', stroke: '#111827', lineWidth: 3 },
+  ]
+}
+
+function createHouseShapes(createId: () => string): Shape[] {
+  return [
+    { id: createId(), type: 'rect', x: 285, y: 230, width: 230, height: 160, fill: '#dbeafe', stroke: '#111827', lineWidth: 4 },
+    {
+      id: createId(),
+      type: 'polygon',
+      points: [
+        { x: 255, y: 235 },
+        { x: 400, y: 120 },
+        { x: 545, y: 235 },
+      ],
+      fill: '#ef4444',
+      stroke: '#111827',
+      lineWidth: 4,
+    },
+    { id: createId(), type: 'rect', x: 378, y: 315, width: 44, height: 75, fill: '#92400e', stroke: '#111827', lineWidth: 3 },
+    { id: createId(), type: 'rect', x: 315, y: 265, width: 42, height: 42, fill: '#ffffff', stroke: '#111827', lineWidth: 3 },
+    { id: createId(), type: 'rect', x: 443, y: 265, width: 42, height: 42, fill: '#ffffff', stroke: '#111827', lineWidth: 3 },
+  ]
+}
+
+export function parseLocalCommands(
+  rawText: string,
+  options: LocalParserOptions = {},
+): DrawingAction[] | null {
+  const text = normalizeText(rawText)
+  const createdAt = options.createdAt ?? new Date().toISOString()
+  const createId = options.createId ?? createDefaultId
+
+  let shapes: Shape[] | null = null
+  if (text.includes('太阳')) shapes = createSunShapes(createId)
+  else if (text.includes('笑脸')) shapes = createSmileShapes(createId)
+  else if (text.includes('树')) shapes = createTreeShapes(createId)
+  else if (text.includes('房子') || text.includes('房屋')) shapes = createHouseShapes(createId)
+
+  return shapes?.map((shape) => createAddShapeAction(shape, rawText, createdAt)) ?? null
 }
 
 export function parseLocalCommand(

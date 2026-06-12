@@ -1,5 +1,5 @@
 import type { DrawingAction } from '../domain/actions'
-import { parseLocalCommand } from './localParser'
+import { parseLocalCommand, parseLocalCommands } from './localParser'
 import { isLLMEnabled, parseBatchWithLLM } from './llmParser'
 import type { LocalParserOptions } from './parserTypes'
 
@@ -8,6 +8,12 @@ export async function routeCommands(
   options: LocalParserOptions = {},
 ): Promise<DrawingAction[]> {
   const createdAt = options.createdAt ?? new Date().toISOString()
+
+  // Deterministic templates for common demo objects.
+  const localCommands = parseLocalCommands(rawText, { ...options, createdAt })
+  if (localCommands) {
+    return localCommands
+  }
 
   // Try local parser first
   const result = parseLocalCommand(rawText, options)

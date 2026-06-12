@@ -11,6 +11,7 @@ import {
 import type { Shape } from './domain/shapes'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
+import { useLLMStatus } from './hooks/useLLMStatus'
 import { routeCommand } from './parser/commandRouter'
 import './App.css'
 
@@ -70,22 +71,24 @@ function App() {
   const [feedbackMessage, setFeedbackMessage] = useState('')
   const nextShapeIndexRef = useRef(0)
   const speechFeedback = useSpeechSynthesis()
+  const llmStatus = useLLMStatus()
   const speech = useSpeechRecognition({
     shouldIgnoreResult: () => speechFeedback.isSpeaking,
     onFinalTranscript: (transcript) => {
-      const action = routeCommand(transcript)
-      const message = getActionFeedback(action)
-
       speech.pauseListening()
-      dispatch(action)
-      setFeedbackMessage(message)
-      speechFeedback.speak(message, {
-        onEnd: () => {
-          // Use ref to get latest value in async callback
-          if (!speech.isManuallyPausedRef.current) {
-            speech.resumeListening()
-          }
-        },
+      setFeedbackMessage('思考中...')
+
+      routeCommand(transcript).then((action) => {
+        const message = getActionFeedback(action)
+        dispatch(action)
+        setFeedbackMessage(message)
+        speechFeedback.speak(message, {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) {
+              speech.resumeListening()
+            }
+          },
+        })
       })
     },
   })
@@ -160,6 +163,7 @@ function App() {
           feedbackMessage={feedbackMessage}
           isFeedbackSpeaking={speechFeedback.isSpeaking}
           isFeedbackVoiceSupported={speechFeedback.isSupported}
+          llmStatus={llmStatus}
         />
 
         <section className="canvas-area" aria-label="Canvas board">

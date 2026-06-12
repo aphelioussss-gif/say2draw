@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import type { VoiceStatus } from '../hooks/useSpeechRecognition'
+import type { LLMStatus } from '../hooks/useLLMStatus'
 import { FeedbackPanel } from './FeedbackPanel'
 
 type VoicePanelProps = {
@@ -13,6 +15,7 @@ type VoicePanelProps = {
   feedbackMessage: string
   isFeedbackSpeaking: boolean
   isFeedbackVoiceSupported: boolean
+  llmStatus: LLMStatus
 }
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
@@ -41,6 +44,21 @@ function getStatusDotClass(status: VoiceStatus) {
   return 'idle'
 }
 
+const LLM_STATUS_LABEL: Record<LLMStatus, string> = {
+  checking: 'LLM: 检测中...',
+  configured: 'LLM: 已就绪',
+  not_configured: 'LLM: 未配置 Key',
+  server_offline: 'LLM: 服务端未启动',
+  error: 'LLM: 连接失败',
+}
+
+function getLLMStatusDotClass(status: LLMStatus) {
+  if (status === 'configured') return 'listening'
+  if (status === 'checking') return 'processing'
+  if (status === 'server_offline' || status === 'not_configured') return 'idle'
+  return 'error'
+}
+
 export function VoicePanel({
   status,
   interimTranscript,
@@ -53,9 +71,60 @@ export function VoicePanel({
   feedbackMessage,
   isFeedbackSpeaking,
   isFeedbackVoiceSupported,
+  llmStatus,
 }: VoicePanelProps) {
   const isPaused = status === 'paused'
   const canControlListening = isSupported && status !== 'unsupported'
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [provider, setProvider] = useState('deepseek')
+  const [customBaseURL, setCustomBaseURL] = useState('')
+  const [modelInput, setModelInput] = useState('')
+  const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'verifying' | 'saved' | 'error'>('idle')
+  const [configError, setConfigError] = useState('')
+
+  const PROVIDER_PRESETS: Record<string, { baseURL: string; defaultModel: string }> = {
+    deepseek: { baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-flash' },
+    mimo: { baseURL: 'https://api.mimo.com/v1', defaultModel: 'mimo-chat' },
+    openai: { baseURL: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
+    custom: { baseURL: '', defaultModel: '' },
+  }
+
+  async function handleSaveApiKey() {
+    if (!apiKeyInput.trim()) return
+
+    const preset = PROVIDER_PRESETS[provider]
+    const baseURL = provider === 'custom' ? customBaseURL.trim() : preset.baseURL
+    const model = modelInput.trim() || preset.defaultModel
+
+    if (!baseURL) {
+      setConfigStatus('error')
+      return
+    }
+
+    setConfigStatus('verifying')
+    setConfigError('')
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: apiKeyInput.trim(), baseURL, model }),
+      })
+
+      const data = await res.json()
+
+      if (data.ok) {
+        setConfigStatus('saved')
+        setApiKeyInput('')
+        window.setTimeout(() => window.location.reload(), 2000)
+      } else {
+        setConfigStatus('error')
+        setConfigError(data.error || '未知错误')
+      }
+    } catch {
+      setConfigStatus('error')
+      setConfigError('无法连接服务端，请确认 npm run server 已启动')
+    }
+  }
 
   return (
     <aside className="voice-panel" aria-label="Voice recognition status">
@@ -107,6 +176,144 @@ export function VoicePanel({
         isSpeaking={isFeedbackSpeaking}
         isVoiceSupported={isFeedbackVoiceSupported}
       />
+
+      <section className="voice-card feedback-card" aria-label="LLM status">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <span
+            className={`status-dot ${getLLMStatusDotClass(llmStatus)}`}
+            aria-hidden="true"
+          />
+          <p className="label" style={{ margin: 0 }}>
+            {LLM_STATUS_LABEL[llmStatus]}
+          </p>
+        </div>
+
+        {llmStatus === 'not_configured' && (
+          <div style={{ marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+              {Object.keys(PROVIDER_PRESETS).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => {
+                    setProvider(p)
+                    setConfigStatus('idle')
+                  }}
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                    background: provider === p ? 'var(--accent, #3b82f6)' : 'var(--surface)',
+                    color: provider === p ? '#fff' : 'var(--text)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 4,
+                  }}
+                >
+                  {p === 'deepseek' ? 'DeepSeek' : p === 'mimo' ? 'Mimo' : p === 'openai' ? 'OpenAI' : '其他'}
+                </button>
+              ))}
+            </div>
+            <input
+              type="password"
+              placeholder="输入 API Key"
+              value={apiKeyInput}
+              onChange={(e) => {
+                setApiKeyInput(e.target.value)
+                if (configStatus === 'error') setConfigStatus('idle')
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveApiKey()
+              }}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                fontSize: 12,
+                fontFamily: 'var(--mono)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                boxSizing: 'border-box',
+                marginBottom: 4,
+              }}
+            />
+            <input
+              type="text"
+              placeholder={`模型 (默认: ${PROVIDER_PRESETS[provider].defaultModel || '手动输入'})`}
+              value={modelInput}
+              onChange={(e) => setModelInput(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                fontSize: 12,
+                fontFamily: 'var(--mono)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                boxSizing: 'border-box',
+                marginBottom: provider === 'custom' ? 4 : 6,
+              }}
+            />
+            {provider === 'custom' && (
+              <input
+                type="text"
+                placeholder="Base URL (如 https://api.xxx.com/v1)"
+                value={customBaseURL}
+                onChange={(e) => setCustomBaseURL(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  fontSize: 12,
+                  fontFamily: 'var(--mono)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4,
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
+                  boxSizing: 'border-box',
+                  marginBottom: 6,
+                }}
+              />
+            )}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                type="button"
+                onClick={handleSaveApiKey}
+                disabled={!apiKeyInput.trim() || configStatus === 'verifying'}
+                style={{
+                  padding: '4px 12px',
+                  fontSize: 12,
+                  cursor: apiKeyInput.trim() && configStatus !== 'verifying' ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {configStatus === 'verifying' ? '验证中...' : '保存并验证'}
+              </button>
+              {configStatus === 'saved' && (
+                <span style={{ fontSize: 12, color: '#22c55e', lineHeight: '26px' }}>
+                  ✓ 验证通过，刷新中...
+                </span>
+              )}
+              {configStatus === 'error' && (
+                <span style={{ fontSize: 12, color: '#ef4444', lineHeight: '18px', maxWidth: 220 }}>
+                  {configError || '保存失败'}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        <p className="feedback-meta">
+          {llmStatus === 'configured'
+            ? '复杂指令将调用 AI 解析'
+            : llmStatus === 'not_configured'
+              ? '复制 .env.example 为 .env 并填入 Key，或在上方直接输入'
+              : llmStatus === 'server_offline'
+                ? '请在终端运行 npm run server 启动 AI 服务'
+                : llmStatus === 'checking'
+                  ? '正在检测 AI 服务...'
+                  : 'AI 服务不可用，本地指令不受影响'}
+        </p>
+      </section>
 
       <section className="demo-prompts" aria-label="Demo command examples">
         <p className="label">试着说</p>

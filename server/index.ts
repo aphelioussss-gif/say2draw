@@ -114,14 +114,45 @@ Rules:
   }
 })
 
-// Runtime configuration endpoint - supports any OpenAI-compatible provider
-app.post('/api/config', (req, res) => {
+// Runtime configuration endpoint - verifies the key works before saving
+app.post('/api/config', async (req, res) => {
   const { apiKey, baseURL, model } = req.body
 
   if (!apiKey || typeof apiKey !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing apiKey parameter' })
   }
 
+  // Build a temporary client to test
+  const testBaseURL = (baseURL && typeof baseURL === 'string')
+    ? baseURL
+    : (runtimeBaseURL || process.env.OPENAI_BASE_URL || 'https://api.deepseek.com')
+  const testModel = (model && typeof model === 'string')
+    ? model
+    : (process.env.OPENAI_MODEL || 'deepseek-chat')
+
+  const testClient = new OpenAI({ apiKey, baseURL: testBaseURL })
+
+  try {
+    const test = await testClient.chat.completions.create({
+      model: testModel,
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 5,
+      temperature: 0,
+    })
+
+    if (!test.choices?.[0]?.message?.content) {
+      return res.json({ ok: false, error: 'API 返回空响应，请检查 Key 和模型名' })
+    }
+  } catch (error) {
+    const msg = String(error).slice(0, 300)
+    console.error('Config verify failed:', msg)
+    return res.json({
+      ok: false,
+      error: `验证失败：${msg.includes('401') ? 'API Key 无效' : msg.includes('404') ? '模型名或 Base URL 不正确' : '网络错误或配置不正确'}`,
+    })
+  }
+
+  // Verification passed - save
   runtimeApiKey = apiKey
   if (baseURL && typeof baseURL === 'string') runtimeBaseURL = baseURL
   if (model && typeof model === 'string') runtimeModel = model
@@ -130,6 +161,7 @@ app.post('/api/config', (req, res) => {
 
   res.json({
     ok: true,
+    verified: true,
     baseURL: getBaseURL(),
     model: getActiveModel(),
   })

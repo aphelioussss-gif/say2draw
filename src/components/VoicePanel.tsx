@@ -77,7 +77,8 @@ export function VoicePanel({
   const [provider, setProvider] = useState('deepseek')
   const [customBaseURL, setCustomBaseURL] = useState('')
   const [modelInput, setModelInput] = useState('')
-  const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'verifying' | 'saved' | 'error'>('idle')
+  const [configError, setConfigError] = useState('')
 
   const PROVIDER_PRESETS: Record<string, { baseURL: string; defaultModel: string }> = {
     deepseek: { baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-chat' },
@@ -98,7 +99,8 @@ export function VoicePanel({
       return
     }
 
-    setConfigStatus('saving')
+    setConfigStatus('verifying')
+    setConfigError('')
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
@@ -106,15 +108,19 @@ export function VoicePanel({
         body: JSON.stringify({ apiKey: apiKeyInput.trim(), baseURL, model }),
       })
 
-      if (res.ok) {
+      const data = await res.json()
+
+      if (data.ok) {
         setConfigStatus('saved')
         setApiKeyInput('')
-        window.setTimeout(() => window.location.reload(), 1500)
+        window.setTimeout(() => window.location.reload(), 2000)
       } else {
         setConfigStatus('error')
+        setConfigError(data.error || '未知错误')
       }
     } catch {
       setConfigStatus('error')
+      setConfigError('无法连接服务端，请确认 npm run server 已启动')
     }
   }
 
@@ -271,23 +277,23 @@ export function VoicePanel({
               <button
                 type="button"
                 onClick={handleSaveApiKey}
-                disabled={!apiKeyInput.trim() || configStatus === 'saving'}
+                disabled={!apiKeyInput.trim() || configStatus === 'verifying'}
                 style={{
                   padding: '4px 12px',
                   fontSize: 12,
-                  cursor: apiKeyInput.trim() ? 'pointer' : 'not-allowed',
+                  cursor: apiKeyInput.trim() && configStatus !== 'verifying' ? 'pointer' : 'not-allowed',
                 }}
               >
-                {configStatus === 'saving' ? '保存中...' : '保存'}
+                {configStatus === 'verifying' ? '验证中...' : '保存并验证'}
               </button>
               {configStatus === 'saved' && (
                 <span style={{ fontSize: 12, color: '#22c55e', lineHeight: '26px' }}>
-                  ✓ 已保存，刷新页面生效
+                  ✓ 验证通过，刷新中...
                 </span>
               )}
               {configStatus === 'error' && (
-                <span style={{ fontSize: 12, color: '#ef4444', lineHeight: '26px' }}>
-                  保存失败，请确认服务端已启动
+                <span style={{ fontSize: 12, color: '#ef4444', lineHeight: '18px', maxWidth: 220 }}>
+                  {configError || '保存失败'}
                 </span>
               )}
             </div>

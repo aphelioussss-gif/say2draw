@@ -127,7 +127,7 @@ Do not use "click to start listening" as the final interaction model.
 
 * localParser for common Chinese commands
 * commandRouter for parser selection
-* OpenAI Structured Outputs for LLM fallback
+* OpenAI-compatible structured LLM provider for optional fallback
 
 ### Validation
 
@@ -141,7 +141,7 @@ Do not use "click to start listening" as the final interaction model.
 
 ### Backend / API
 
-* Use a minimal serverless API route or lightweight proxy only for OpenAI calls.
+* Use a minimal serverless API route or lightweight proxy for LLM calls.
 * API keys must never appear in frontend code.
 * `.env` must never be committed.
 * `.env.example` should be committed.
@@ -264,7 +264,7 @@ Good PR examples:
 * `feat: add local command parser`
 * `feat: connect voice commands to canvas actions`
 * `feat: add speech feedback`
-* `feat: add openai structured command parser`
+* `feat: add llm structured command parser`
 * `feat: support batch actions and clarification`
 * `docs: finalize readme design doc and demo script`
 
@@ -326,7 +326,7 @@ Must implement:
 
 Implement only after P0 is stable:
 
-1. OpenAI Structured Outputs fallback parser.
+1. OpenAI-compatible structured LLM fallback parser.
 2. batch_actions for complex commands.
 3. ask_clarification for vague commands.
 4. repeated command cache.
@@ -517,7 +517,7 @@ The local parser should return a structured result, not directly mutate state.
 
 Use LLM only when local parsing fails.
 
-Use OpenAI Structured Outputs.
+Use an OpenAI-compatible structured output API when a provider is configured.
 
 Rules:
 
@@ -547,7 +547,7 @@ Always provide:
 2. README instructions for environment variables
 3. Safe fallback when API key is missing
 
-If OpenAI is not configured, the app should still support P0 local commands.
+If no LLM provider is configured, the app should still support P0 local commands.
 
 ---
 

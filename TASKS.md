@@ -67,10 +67,10 @@ MVP 判断标准：
 | PR 2  | Done   | canvas-engine                | feat: add canvas drawing engine                  | -          | 2026-06-12   | Canvas 渲染基础图形                        |
 | PR 3  | Done   | drawing-reducer              | feat: add drawing reducer and history            | -          | 2026-06-12   | useReducer / undo / history          |
 | PR 4  | Done   | speech-recognition           | feat: add automatic speech recognition           | -          | 2026-06-12   | 自动持续监听，不是点击开始                        |
-| PR 5  | Todo   | feat/local-parser            | feat: add local command parser                   | -          | -            | 本地规则解析中文指令                           |
+| PR 5  | Done   | local-parser                 | feat: add local command parser                   | -          | 2026-06-12   | 本地规则解析中文指令                           |
 | PR 6  | Todo   | feat/voice-to-canvas         | feat: connect voice commands to canvas actions   | -          | -            | 打通语音到绘图闭环                            |
 | PR 7  | Todo   | feat/speech-feedback         | feat: add speech feedback                        | -          | -            | 语音反馈与回声保护                            |
-| PR 8  | Todo   | feat/openai-parser           | feat: add openai structured command parser       | -          | -            | OpenAI Structured Outputs 兜底         |
+| PR 8  | Todo   | feat/llm-parser              | feat: add llm structured command parser          | -          | -            | OpenAI-compatible LLM 兜底            |
 | PR 9  | Todo   | feat/batch-actions           | feat: support batch actions and clarification    | -          | -            | 复杂指令拆解与澄清                            |
 | PR 10 | Todo   | docs/finalize-submission     | docs: finalize readme design doc and demo script | -          | -            | README / DESIGN / Demo 视频            |
 
@@ -126,7 +126,7 @@ docs: add project planning documents
 * [ ] TASKS 已建立进度表。
 * [ ] 明确写入"不把点击开始监听作为核心路径"。
 * [ ] 明确写入"页面加载后自动持续监听"。
-* [ ] 明确写入 OpenAI Structured Outputs 作为 LLM 兜底方案。
+* [ ] 明确写入 OpenAI-compatible structured output API 作为 LLM 兜底方案。
 
 不包含：
 
@@ -388,7 +388,7 @@ feat: add automatic speech recognition
 Branch:
 
 ```text
-feat/local-parser
+local-parser
 ```
 
 Title:
@@ -408,7 +408,7 @@ feat: add local command parser
 
 * `src/parser/parserTypes.ts`
 * `src/parser/localParser.ts`
-* `src/parser/localParser.test.ts`
+* typed parser examples in `src/parser/localParser.ts`
 * `src/domain/actions.ts`
 * `src/domain/shapes.ts`
 * `README.md`
@@ -564,23 +564,23 @@ feat: add speech feedback
 
 ---
 
-### PR 8：OpenAI Structured Outputs 复杂指令解析
+### PR 8：OpenAI-compatible LLM 复杂指令解析
 
 Branch:
 
 ```text
-feat/openai-parser
+feat/llm-parser
 ```
 
 Title:
 
 ```text
-feat: add openai structured command parser
+feat: add llm structured command parser
 ```
 
 目标：
 
-* 在本地解析失败后调用 OpenAI Structured Outputs。
+* 在本地解析失败后调用 OpenAI-compatible structured output API。
 * 让 LLM 返回结构化 DrawingAction JSON。
 * 校验返回结果。
 * 不把 API key 暴露在前端。
@@ -622,7 +622,7 @@ feat: add openai structured command parser
 建议 commit:
 
 ```text
-feat: add openai structured command parser
+feat: add llm structured command parser
 ```
 
 ---

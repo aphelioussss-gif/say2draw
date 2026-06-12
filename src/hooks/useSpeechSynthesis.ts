@@ -15,14 +15,22 @@ export function useSpeechSynthesis(): SpeechSynthesisResult {
   const isSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
   const [isSpeaking, setIsSpeaking] = useState(false)
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
+  const onEndCallbackRef = useRef<(() => void) | null>(null)
 
   function cancel() {
     if (!isSupported) {
       return
     }
 
+    // Call the pending onEnd callback before canceling
+    const pendingOnEnd = onEndCallbackRef.current
+    onEndCallbackRef.current = null
+    
     window.speechSynthesis.cancel()
     setIsSpeaking(false)
+    
+    // Invoke the callback after state update
+    pendingOnEnd?.()
   }
 
   function speak(message: string, options: SpeakOptions = {}) {
@@ -31,12 +39,16 @@ export function useSpeechSynthesis(): SpeechSynthesisResult {
       return
     }
 
-    window.speechSynthesis.cancel()
+    // Cancel any ongoing speech and invoke its onEnd
+    cancel()
 
     const utterance = new SpeechSynthesisUtterance(message)
     utterance.lang = 'zh-CN'
     utterance.rate = 1
     utterance.pitch = 1
+
+    // Store the onEnd callback
+    onEndCallbackRef.current = options.onEnd ?? null
 
     utterance.onstart = () => {
       setIsSpeaking(true)
@@ -44,12 +56,16 @@ export function useSpeechSynthesis(): SpeechSynthesisResult {
 
     utterance.onend = () => {
       setIsSpeaking(false)
-      options.onEnd?.()
+      const callback = onEndCallbackRef.current
+      onEndCallbackRef.current = null
+      callback?.()
     }
 
     utterance.onerror = () => {
       setIsSpeaking(false)
-      options.onEnd?.()
+      const callback = onEndCallbackRef.current
+      onEndCallbackRef.current = null
+      callback?.()
     }
 
     utteranceRef.current = utterance
@@ -59,6 +75,7 @@ export function useSpeechSynthesis(): SpeechSynthesisResult {
   useEffect(() => {
     return () => {
       utteranceRef.current = null
+      onEndCallbackRef.current = null
       if (isSupported) {
         window.speechSynthesis.cancel()
       }

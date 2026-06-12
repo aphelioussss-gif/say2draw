@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 
 export type VoiceStatus =
   | 'booting'
@@ -24,6 +24,8 @@ type SpeechRecognitionResult = {
   pauseListening: () => void
   resumeListening: () => void
   isManuallyPaused: boolean
+  /** Ref for accessing latest isManuallyPaused in async callbacks */
+  isManuallyPausedRef: MutableRefObject<boolean>
 }
 
 type SpeechRecognitionLike = {
@@ -247,5 +249,6 @@ export function useSpeechRecognition({
     pauseListening,
     resumeListening,
     isManuallyPaused,
+    isManuallyPausedRef,
   }
 }

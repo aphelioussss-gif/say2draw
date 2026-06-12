@@ -83,7 +83,7 @@ export function VoicePanel({
   const [configError, setConfigError] = useState('')
 
   const PROVIDER_PRESETS: Record<string, { baseURL: string; defaultModel: string }> = {
-    deepseek: { baseURL: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat' },
+    deepseek: { baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-flash' },
     mimo: { baseURL: 'https://api.mimo.com/v1', defaultModel: 'mimo-chat' },
     openai: { baseURL: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
     custom: { baseURL: '', defaultModel: '' },

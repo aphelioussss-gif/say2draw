@@ -15,15 +15,14 @@ let runtimeBaseURL: string | null = null
 let runtimeModel: string | null = null
 
 function getBaseURL(): string {
-  return runtimeBaseURL || process.env.OPENAI_BASE_URL || 'https://api.deepseek.com/v1'
+  return runtimeBaseURL || process.env.OPENAI_BASE_URL || 'https://api.deepseek.com'
 }
 
 function getActiveModel(): string {
   if (runtimeModel) return runtimeModel
   if (process.env.OPENAI_MODEL) return process.env.OPENAI_MODEL
-  // Auto-detect default per provider
   const base = getBaseURL()
-  if (base.includes('deepseek')) return 'deepseek-chat'
+  if (base.includes('deepseek')) return 'deepseek-v4-flash'
   if (base.includes('mimo')) return 'mimo-chat'
   return 'gpt-4o-mini'
 }
@@ -128,7 +127,7 @@ app.post('/api/config', async (req, res) => {
     : (runtimeBaseURL || process.env.OPENAI_BASE_URL || 'https://api.deepseek.com')
   const testModel = (model && typeof model === 'string')
     ? model
-    : (process.env.OPENAI_MODEL || 'deepseek-chat')
+    : (process.env.OPENAI_MODEL || 'deepseek-v4-flash')
 
   const testClient = new OpenAI({ apiKey, baseURL: testBaseURL })
 

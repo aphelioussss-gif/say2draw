@@ -432,6 +432,10 @@ export type DrawingAction =
   | { type: 'batch_actions'; actions: DrawingAction[] };
 ```
 
+PR 3 implements the MVP reducer subset first: `add_shape`,
+`clear_canvas`, and `undo`. The broader action set remains documented as the
+target model for later parser and LLM integration PRs.
+
 ### CommandRecord
 
 Each command history item should include:

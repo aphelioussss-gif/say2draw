@@ -15,7 +15,7 @@ let runtimeBaseURL: string | null = null
 let runtimeModel: string | null = null
 
 function getBaseURL(): string {
-  return runtimeBaseURL || process.env.OPENAI_BASE_URL || 'https://api.deepseek.com'
+  return runtimeBaseURL || process.env.OPENAI_BASE_URL || 'https://api.deepseek.com/v1'
 }
 
 function getActiveModel(): string {
@@ -140,8 +140,12 @@ app.post('/api/config', async (req, res) => {
       temperature: 0,
     })
 
-    if (!test.choices?.[0]?.message?.content) {
-      return res.json({ ok: false, error: 'API 返回空响应，请检查 Key 和模型名' })
+    const reply = test.choices?.[0]?.message?.content
+    if (!reply) {
+      return res.json({
+        ok: false,
+        error: `API 连接成功但返回空响应。模型 "${testModel}" 可能不支持，请检查模型名（如 deepseek-chat、deepseek-v4-flash 等）`,
+      })
     }
   } catch (error) {
     const msg = String(error).slice(0, 300)

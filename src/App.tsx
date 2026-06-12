@@ -81,7 +81,8 @@ function App() {
       setFeedbackMessage(message)
       speechFeedback.speak(message, {
         onEnd: () => {
-          if (!speech.isManuallyPaused) {
+          // Use ref to get latest value in async callback
+          if (!speech.isManuallyPausedRef.current) {
             speech.resumeListening()
           }
         },

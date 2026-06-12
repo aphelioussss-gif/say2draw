@@ -160,12 +160,19 @@ app.post('/api/config', async (req, res) => {
       })
     }
   } catch (error) {
-    const msg = String(error).slice(0, 300)
-    console.error('Config verify failed:', msg)
-    return res.json({
-      ok: false,
-      error: `验证失败：${msg.includes('401') ? 'API Key 无效' : msg.includes('404') ? '模型名或 Base URL 不正确' : '网络错误或配置不正确'}`,
-    })
+    const msg = String(error).slice(0, 500)
+    console.error('Config verify failed:')
+    console.error('  Base URL:', testBaseURL)
+    console.error('  Model:', resolvedTestModel)
+    console.error('  Error:', msg)
+
+    let userMessage = '网络错误或配置不正确'
+    if (msg.includes('401') || msg.includes('403')) userMessage = 'API Key 无效'
+    else if (msg.includes('404')) userMessage = `模型 "${resolvedTestModel}" 不存在`
+    else if (msg.includes('ENOTFOUND') || msg.includes('ECONNREFUSED')) userMessage = '无法连接到 API 服务器'
+    else if (msg.includes('timeout') || msg.includes('ETIMEDOUT')) userMessage = '连接超时，请检查网络'
+
+    return res.json({ ok: false, error: `验证失败：${userMessage}。${msg.slice(0, 100)}` })
   }
 
   // Verification passed - save

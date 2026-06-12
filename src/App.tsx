@@ -1,3 +1,6 @@
+import { CanvasBoard } from './components/CanvasBoard'
+import { DevControls } from './components/DevControls'
+import type { Shape } from './domain/shapes'
 import './App.css'
 
 const commandExamples = [
@@ -26,6 +29,49 @@ const historyItems = [
     transcript: '画一个太阳、两朵云和一棵树',
     action: 'batch_actions',
     status: 'planned',
+  },
+]
+
+const devShapes: Shape[] = [
+  {
+    id: 'demo-circle',
+    type: 'circle',
+    x: 150,
+    y: 150,
+    radius: 58,
+    fill: '#fee2e2',
+    stroke: '#ef4444',
+    lineWidth: 4,
+  },
+  {
+    id: 'demo-rect',
+    type: 'rect',
+    x: 500,
+    y: 92,
+    width: 170,
+    height: 116,
+    fill: '#dbeafe',
+    stroke: '#3b82f6',
+    lineWidth: 4,
+  },
+  {
+    id: 'demo-line',
+    type: 'line',
+    x1: 190,
+    y1: 330,
+    x2: 610,
+    y2: 332,
+    stroke: '#22c55e',
+    lineWidth: 6,
+  },
+  {
+    id: 'demo-text',
+    type: 'text',
+    x: 400,
+    y: 260,
+    text: '你好 Say2Draw',
+    fill: '#111827',
+    fontSize: 34,
   },
 ]
 
@@ -70,12 +116,10 @@ function App() {
           </section>
         </aside>
 
-        <section className="canvas-area" aria-label="Canvas placeholder">
-          <div className="canvas-board" role="img" aria-label="Canvas placeholder">
-            <div className="canvas-empty-state">
-              <p>Canvas Board</p>
-              <span>Say: "画一个红色圆形"</span>
-            </div>
+        <section className="canvas-area" aria-label="Canvas board">
+          <div className="canvas-stage">
+            <CanvasBoard shapes={devShapes} />
+            <DevControls shapes={devShapes} />
           </div>
         </section>
 

@@ -392,6 +392,10 @@ Rules:
 7. LLM output must be validated before execution.
 8. App may orchestrate modules but should not become a giant file.
 
+PR 2 implements the first Canvas boundary: `src/domain/shapes.ts` defines
+renderable shape types, while `src/components/CanvasBoard.tsx` draws those
+shapes to HTML Canvas 2D without handling voice, parser, or reducer logic.
+
 ---
 
 ## 10. Core Data Model

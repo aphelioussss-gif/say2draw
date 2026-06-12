@@ -64,7 +64,7 @@ MVP 判断标准：
 | ----- | ------ | ---------------------------- | ------------------------------------------------ | ---------- | ------------ | ------------------------------------ |
 | PR 0  | Done   | main                         | chore: initialize project baseline               | b72e3c2    | 2026-06-12   | PRD / PLAN / SYSTEM / AGENTS / TASKS / Vite baseline |
 | PR 1  | Done   | app-scaffold                 | feat: initialize app scaffold                    | d835ab2    | 2026-06-12   | 基础页面布局，不做业务功能                        |
-| PR 2  | Todo   | feat/canvas-engine           | feat: add canvas drawing engine                  | -          | -            | Canvas 渲染基础图形                        |
+| PR 2  | Done   | canvas-engine                | feat: add canvas drawing engine                  | -          | 2026-06-12   | Canvas 渲染基础图形                        |
 | PR 3  | Todo   | feat/drawing-reducer         | feat: add drawing reducer and history            | -          | -            | useReducer / undo / history          |
 | PR 4  | Todo   | feat/auto-speech-recognition | feat: add automatic speech recognition           | -          | -            | 自动持续监听，不是点击开始                        |
 | PR 5  | Todo   | feat/local-parser            | feat: add local command parser                   | -          | -            | 本地规则解析中文指令                           |
@@ -207,7 +207,7 @@ feat: initialize app scaffold
 Branch:
 
 ```text
-feat/canvas-engine
+canvas-engine
 ```
 
 Title:

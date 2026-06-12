@@ -66,7 +66,7 @@ MVP 判断标准：
 | PR 1  | Done   | app-scaffold                 | feat: initialize app scaffold                    | d835ab2    | 2026-06-12   | 基础页面布局，不做业务功能                        |
 | PR 2  | Done   | canvas-engine                | feat: add canvas drawing engine                  | -          | 2026-06-12   | Canvas 渲染基础图形                        |
 | PR 3  | Done   | drawing-reducer              | feat: add drawing reducer and history            | -          | 2026-06-12   | useReducer / undo / history          |
-| PR 4  | Todo   | feat/auto-speech-recognition | feat: add automatic speech recognition           | -          | -            | 自动持续监听，不是点击开始                        |
+| PR 4  | Done   | speech-recognition           | feat: add automatic speech recognition           | -          | 2026-06-12   | 自动持续监听，不是点击开始                        |
 | PR 5  | Todo   | feat/local-parser            | feat: add local command parser                   | -          | -            | 本地规则解析中文指令                           |
 | PR 6  | Todo   | feat/voice-to-canvas         | feat: connect voice commands to canvas actions   | -          | -            | 打通语音到绘图闭环                            |
 | PR 7  | Todo   | feat/speech-feedback         | feat: add speech feedback                        | -          | -            | 语音反馈与回声保护                            |
@@ -323,7 +323,7 @@ feat: add drawing reducer and history
 Branch:
 
 ```text
-feat/auto-speech-recognition
+speech-recognition
 ```
 
 Title:

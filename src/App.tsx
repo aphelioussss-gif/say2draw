@@ -11,6 +11,7 @@ import {
 import type { Shape } from './domain/shapes'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
+import { useLLMStatus } from './hooks/useLLMStatus'
 import { routeCommand } from './parser/commandRouter'
 import './App.css'
 
@@ -70,6 +71,7 @@ function App() {
   const [feedbackMessage, setFeedbackMessage] = useState('')
   const nextShapeIndexRef = useRef(0)
   const speechFeedback = useSpeechSynthesis()
+  const llmStatus = useLLMStatus()
   const speech = useSpeechRecognition({
     shouldIgnoreResult: () => speechFeedback.isSpeaking,
     onFinalTranscript: (transcript) => {
@@ -161,6 +163,7 @@ function App() {
           feedbackMessage={feedbackMessage}
           isFeedbackSpeaking={speechFeedback.isSpeaking}
           isFeedbackVoiceSupported={speechFeedback.isSupported}
+          llmStatus={llmStatus}
         />
 
         <section className="canvas-area" aria-label="Canvas board">

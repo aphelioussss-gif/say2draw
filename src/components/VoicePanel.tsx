@@ -1,4 +1,5 @@
 import type { VoiceStatus } from '../hooks/useSpeechRecognition'
+import type { LLMStatus } from '../hooks/useLLMStatus'
 import { FeedbackPanel } from './FeedbackPanel'
 
 type VoicePanelProps = {
@@ -13,6 +14,7 @@ type VoicePanelProps = {
   feedbackMessage: string
   isFeedbackSpeaking: boolean
   isFeedbackVoiceSupported: boolean
+  llmStatus: LLMStatus
 }
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
@@ -41,6 +43,19 @@ function getStatusDotClass(status: VoiceStatus) {
   return 'idle'
 }
 
+const LLM_STATUS_LABEL: Record<LLMStatus, string> = {
+  checking: 'LLM: 检测中...',
+  configured: 'LLM: 已就绪',
+  not_configured: 'LLM: 未配置',
+  error: 'LLM: 连接失败',
+}
+
+function getLLMStatusDotClass(status: LLMStatus) {
+  if (status === 'configured') return 'listening'
+  if (status === 'checking') return 'processing'
+  return 'error'
+}
+
 export function VoicePanel({
   status,
   interimTranscript,
@@ -53,6 +68,7 @@ export function VoicePanel({
   feedbackMessage,
   isFeedbackSpeaking,
   isFeedbackVoiceSupported,
+  llmStatus,
 }: VoicePanelProps) {
   const isPaused = status === 'paused'
   const canControlListening = isSupported && status !== 'unsupported'
@@ -107,6 +123,27 @@ export function VoicePanel({
         isSpeaking={isFeedbackSpeaking}
         isVoiceSupported={isFeedbackVoiceSupported}
       />
+
+      <section className="voice-card feedback-card" aria-label="LLM status">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            className={`status-dot ${getLLMStatusDotClass(llmStatus)}`}
+            aria-hidden="true"
+          />
+          <p className="label" style={{ margin: 0 }}>
+            {LLM_STATUS_LABEL[llmStatus]}
+          </p>
+        </div>
+        <p className="feedback-meta">
+          {llmStatus === 'configured'
+            ? '复杂指令将调用 AI 解析'
+            : llmStatus === 'not_configured'
+              ? '复杂指令将提示澄清，不影响本地指令'
+              : llmStatus === 'checking'
+                ? '正在检测 AI 服务...'
+                : 'AI 服务不可用，本地指令不受影响'}
+        </p>
+      </section>
 
       <section className="demo-prompts" aria-label="Demo command examples">
         <p className="label">试着说</p>

@@ -93,6 +93,7 @@ Rules:
     })
 
     const content = completion.choices[0]?.message?.content
+      || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
 
     if (!content) {
       return res.json({ ok: false, error: 'No response from LLM' })
@@ -135,15 +136,17 @@ app.post('/api/config', async (req, res) => {
     const test = await testClient.chat.completions.create({
       model: testModel,
       messages: [{ role: 'user', content: 'hi' }],
-      max_tokens: 5,
+      max_tokens: 50,
       temperature: 0,
     })
 
     const reply = test.choices?.[0]?.message?.content
+      || (test.choices?.[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
+
     if (!reply) {
       return res.json({
         ok: false,
-        error: `API 连接成功但返回空响应。模型 "${testModel}" 可能不支持，请检查模型名（如 deepseek-chat、deepseek-v4-flash 等）`,
+        error: `API 连接成功但返回空响应。模型 "${testModel}" 可能处于思考模式，请尝试在模型名后加 @nothink（如 deepseek-v4-flash@nothink）`,
       })
     }
   } catch (error) {

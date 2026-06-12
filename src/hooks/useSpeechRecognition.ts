@@ -77,6 +77,8 @@ function getErrorMessage(error: string, fallback?: string) {
   return fallback || `语音识别异常：${error}`
 }
 
+const SILENCE_TIMEOUT_MS = 1500
+
 export function useSpeechRecognition({
   lang = 'zh-CN',
   onFinalTranscript,
@@ -89,6 +91,8 @@ export function useSpeechRecognition({
   const isManuallyPausedRef = useRef(false)
   const onFinalTranscriptRef = useRef(onFinalTranscript)
   const shouldIgnoreResultRef = useRef(shouldIgnoreResult)
+  const speechBufferRef = useRef('')
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [status, setStatus] = useState<VoiceStatus>(() =>
     isSupported ? 'booting' : 'unsupported',
   )
@@ -112,6 +116,11 @@ export function useSpeechRecognition({
     isManuallyPausedRef.current = true
     setIsManuallyPaused(true)
     setInterimTranscript('')
+    speechBufferRef.current = ''
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
     setStatus('paused')
     recognitionRef.current?.stop()
   }
@@ -162,6 +171,11 @@ export function useSpeechRecognition({
     recognition.onresult = (event: SpeechRecognitionEventLike) => {
       if (shouldIgnoreResultRef.current?.()) {
         setInterimTranscript('')
+        speechBufferRef.current = ''
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current)
+          silenceTimerRef.current = null
+        }
         return
       }
 
@@ -186,14 +200,25 @@ export function useSpeechRecognition({
       setInterimTranscript(interimText)
 
       if (finalText) {
+        // Accumulate and wait for silence before processing
+        speechBufferRef.current += finalText
+        setFinalTranscript(speechBufferRef.current)
         setStatus('processing')
-        setFinalTranscript(finalText)
-        onFinalTranscriptRef.current?.(finalText)
-        window.setTimeout(() => {
-          if (shouldListenRef.current) {
-            setStatus('listening')
-          }
-        }, 250)
+
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current)
+        }
+
+        silenceTimerRef.current = setTimeout(() => {
+          const completeText = speechBufferRef.current
+          speechBufferRef.current = ''
+          onFinalTranscriptRef.current?.(completeText)
+          window.setTimeout(() => {
+            if (shouldListenRef.current) {
+              setStatus('listening')
+            }
+          }, 250)
+        }, SILENCE_TIMEOUT_MS)
       }
     }
 
@@ -232,6 +257,11 @@ export function useSpeechRecognition({
     return () => {
       shouldListenRef.current = false
       isManuallyPausedRef.current = false
+      speechBufferRef.current = ''
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current)
+        silenceTimerRef.current = null
+      }
       recognition.onstart = null
       recognition.onresult = null
       recognition.onerror = null

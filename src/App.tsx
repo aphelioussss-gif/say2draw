@@ -2,11 +2,13 @@ import { useReducer, useRef } from 'react'
 import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
 import { DevControls } from './components/DevControls'
+import { VoicePanel } from './components/VoicePanel'
 import {
   drawingReducer,
   initialDrawingState,
 } from './domain/reducer'
 import type { Shape } from './domain/shapes'
+import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import './App.css'
 
 const commandExamples = [
@@ -63,6 +65,7 @@ const devShapeTemplates: Shape[] = [
 function App() {
   const [state, dispatch] = useReducer(drawingReducer, initialDrawingState)
   const nextShapeIndexRef = useRef(0)
+  const speech = useSpeechRecognition()
 
   function createTimestamp() {
     return new Date().toISOString()
@@ -112,38 +115,21 @@ function App() {
           <p className="eyebrow">Say2Draw</p>
           <h1>以声绘色</h1>
         </div>
-        <div className="status-pill" aria-label="Voice status: idle">
-          <span className="status-dot idle" aria-hidden="true" />
-          <span>Idle / 等待麦克风权限</span>
+        <div className="status-pill" aria-label={`Voice status: ${speech.status}`}>
+          <span className={`status-dot ${speech.status}`} aria-hidden="true" />
+          <span>{speech.status}</span>
         </div>
       </header>
 
       <section className="workspace" aria-label="Voice drawing workspace">
-        <aside className="voice-panel" aria-label="Voice recognition status">
-          <div className="panel-heading">
-            <span className="status-dot listening" aria-hidden="true" />
-            <h2>Voice Panel</h2>
-          </div>
-
-          <section className="voice-card">
-            <p className="label">你说</p>
-            <p className="content placeholder">尚未接入语音识别</p>
-          </section>
-
-          <section className="voice-card">
-            <p className="label">系统反馈</p>
-            <p className="content">PR 3 已接入 reducer，后续 PR 接入自动监听。</p>
-          </section>
-
-          <section className="demo-prompts" aria-label="Demo command examples">
-            <p className="label">试着说</p>
-            <ul>
-              {commandExamples.map((command) => (
-                <li key={command}>{command}</li>
-              ))}
-            </ul>
-          </section>
-        </aside>
+        <VoicePanel
+          status={speech.status}
+          interimTranscript={speech.interimTranscript}
+          finalTranscript={speech.finalTranscript}
+          errorMessage={speech.errorMessage}
+          isSupported={speech.isSupported}
+          commandExamples={commandExamples}
+        />
 
         <section className="canvas-area" aria-label="Canvas board">
           <div className="canvas-stage">

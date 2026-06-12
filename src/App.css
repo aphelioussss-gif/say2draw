@@ -64,6 +64,17 @@
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+.status-dot.booting,
+.status-dot.processing {
+  background: var(--accent-yellow);
+}
+
+.status-dot.permission_required,
+.status-dot.error,
+.status-dot.unsupported {
+  background: var(--accent-red);
+}
+
 .workspace {
   height: calc(100vh - 101px);
   min-height: 560px;
@@ -123,6 +134,10 @@
 
 .placeholder {
   color: var(--text-muted);
+}
+
+.error-text {
+  color: #fca5a5;
 }
 
 .demo-prompts ul,

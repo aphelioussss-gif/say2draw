@@ -27,6 +27,15 @@ function getActiveModel(): string {
   return 'gpt-4o-mini'
 }
 
+/** Append @nothink for DeepSeek to disable thinking mode */
+function resolveModel(): string {
+  const model = getActiveModel()
+  if (getBaseURL().includes('deepseek') && !model.includes('@')) {
+    return model + '@nothink'
+  }
+  return model
+}
+
 function getOpenAIClient(): OpenAI | null {
   const apiKey = runtimeApiKey || process.env.OPENAI_API_KEY
   if (!apiKey) return null
@@ -82,7 +91,7 @@ Rules:
 
   try {
     const completion = await client.chat.completions.create({
-      model: getActiveModel(),
+      model: resolveModel(),
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: text },
@@ -93,7 +102,6 @@ Rules:
     })
 
     const content = completion.choices[0]?.message?.content
-      || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
 
     if (!content) {
       return res.json({ ok: false, error: 'No response from LLM' })
@@ -129,24 +137,26 @@ app.post('/api/config', async (req, res) => {
   const testModel = (model && typeof model === 'string')
     ? model
     : (process.env.OPENAI_MODEL || 'deepseek-v4-flash')
+  // Disable thinking mode for DeepSeek
+  const resolvedTestModel = testBaseURL.includes('deepseek') && !testModel.includes('@')
+    ? testModel + '@nothink'
+    : testModel
 
   const testClient = new OpenAI({ apiKey, baseURL: testBaseURL })
 
   try {
     const test = await testClient.chat.completions.create({
-      model: testModel,
+      model: resolvedTestModel,
       messages: [{ role: 'user', content: 'hi' }],
       max_tokens: 50,
       temperature: 0,
     })
 
     const reply = test.choices?.[0]?.message?.content
-      || (test.choices?.[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
-
     if (!reply) {
       return res.json({
         ok: false,
-        error: `API 连接成功但返回空响应。模型 "${testModel}" 可能处于思考模式，请尝试在模型名后加 @nothink（如 deepseek-v4-flash@nothink）`,
+        error: `API 连接成功但返回空响应。模型 "${resolvedTestModel}" 异常，请检查 Key 和模型名`,
       })
     }
   } catch (error) {

@@ -74,17 +74,36 @@ export function VoicePanel({
   const isPaused = status === 'paused'
   const canControlListening = isSupported && status !== 'unsupported'
   const [apiKeyInput, setApiKeyInput] = useState('')
+  const [provider, setProvider] = useState('deepseek')
+  const [customBaseURL, setCustomBaseURL] = useState('')
+  const [modelInput, setModelInput] = useState('')
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+  const PROVIDER_PRESETS: Record<string, { baseURL: string; defaultModel: string }> = {
+    deepseek: { baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-chat' },
+    mimo: { baseURL: 'https://api.mimo.com/v1', defaultModel: 'mimo-chat' },
+    openai: { baseURL: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
+    custom: { baseURL: '', defaultModel: '' },
+  }
 
   async function handleSaveApiKey() {
     if (!apiKeyInput.trim()) return
+
+    const preset = PROVIDER_PRESETS[provider]
+    const baseURL = provider === 'custom' ? customBaseURL.trim() : preset.baseURL
+    const model = modelInput.trim() || preset.defaultModel
+
+    if (!baseURL) {
+      setConfigStatus('error')
+      return
+    }
 
     setConfigStatus('saving')
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: apiKeyInput.trim() }),
+        body: JSON.stringify({ apiKey: apiKeyInput.trim(), baseURL, model }),
       })
 
       if (res.ok) {
@@ -163,9 +182,32 @@ export function VoicePanel({
 
         {llmStatus === 'not_configured' && (
           <div style={{ marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+              {Object.keys(PROVIDER_PRESETS).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => {
+                    setProvider(p)
+                    setConfigStatus('idle')
+                  }}
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                    background: provider === p ? 'var(--accent, #3b82f6)' : 'var(--surface)',
+                    color: provider === p ? '#fff' : 'var(--text)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 4,
+                  }}
+                >
+                  {p === 'deepseek' ? 'DeepSeek' : p === 'mimo' ? 'Mimo' : p === 'openai' ? 'OpenAI' : '其他'}
+                </button>
+              ))}
+            </div>
             <input
               type="password"
-              placeholder="输入 OpenAI API Key"
+              placeholder="输入 API Key"
               value={apiKeyInput}
               onChange={(e) => {
                 setApiKeyInput(e.target.value)
@@ -184,9 +226,48 @@ export function VoicePanel({
                 background: 'var(--surface)',
                 color: 'var(--text)',
                 boxSizing: 'border-box',
+                marginBottom: 4,
               }}
             />
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <input
+              type="text"
+              placeholder={`模型 (默认: ${PROVIDER_PRESETS[provider].defaultModel || '手动输入'})`}
+              value={modelInput}
+              onChange={(e) => setModelInput(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                fontSize: 12,
+                fontFamily: 'var(--mono)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                boxSizing: 'border-box',
+                marginBottom: provider === 'custom' ? 4 : 6,
+              }}
+            />
+            {provider === 'custom' && (
+              <input
+                type="text"
+                placeholder="Base URL (如 https://api.xxx.com/v1)"
+                value={customBaseURL}
+                onChange={(e) => setCustomBaseURL(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  fontSize: 12,
+                  fontFamily: 'var(--mono)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4,
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
+                  boxSizing: 'border-box',
+                  marginBottom: 6,
+                }}
+              />
+            )}
+            <div style={{ display: 'flex', gap: 6 }}>
               <button
                 type="button"
                 onClick={handleSaveApiKey}

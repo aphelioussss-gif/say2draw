@@ -1,37 +1,56 @@
 import express from 'express'
 import cors from 'cors'
 import OpenAI from 'openai'
-import { DRAWING_ACTION_SCHEMA } from '../src/parser/actionSchema'
 
 const app = express()
 const port = process.env.PORT || 3001
 
-// Middleware
 app.use(cors())
 app.use(express.json())
 
-// OpenAI client - only initialize if API key is available
+// Runtime overrides (set via /api/config)
 let openai: OpenAI | null = null
 let runtimeApiKey: string | null = null
+let runtimeBaseURL: string | null = null
 let runtimeModel: string | null = null
 
-function getOpenAIClient(): OpenAI | null {
-  const apiKey = runtimeApiKey || process.env.OPENAI_API_KEY
-  if (!apiKey) {
-    return null
-  }
-
-  if (openai) {
-    return openai
-  }
-
-  openai = new OpenAI({ apiKey })
-  return openai
+function getBaseURL(): string {
+  return runtimeBaseURL || process.env.OPENAI_BASE_URL || 'https://api.deepseek.com'
 }
 
 function getActiveModel(): string {
-  return runtimeModel || process.env.OPENAI_MODEL || 'gpt-4o-mini'
+  if (runtimeModel) return runtimeModel
+  if (process.env.OPENAI_MODEL) return process.env.OPENAI_MODEL
+  // Auto-detect default per provider
+  const base = getBaseURL()
+  if (base.includes('deepseek')) return 'deepseek-chat'
+  if (base.includes('mimo')) return 'mimo-chat'
+  return 'gpt-4o-mini'
 }
+
+function getOpenAIClient(): OpenAI | null {
+  const apiKey = runtimeApiKey || process.env.OPENAI_API_KEY
+  if (!apiKey) return null
+  if (openai) return openai
+
+  openai = new OpenAI({ apiKey, baseURL: getBaseURL() })
+  return openai
+}
+
+// Inline schema for the system prompt (json_object mode)
+const OUTPUT_SCHEMA_TEXT = `{
+  "type": "add_shape" | "clear_canvas" | "undo" | "ask_clarification",
+  "shape": {                          // only for add_shape
+    "type": "circle" | "rect" | "line" | "text",
+    "x": number, "y": number,
+    "radius"?: number,                // circle only
+    "width"?: number, "height"?: number, // rect only
+    "x1"?: number, "y1"?: number, "x2"?: number, "y2"?: number, // line only
+    "text"?: string, "fontSize"?: number, // text only
+    "fill"?: string, "stroke"?: string, "lineWidth"?: number
+  },
+  "clarification"?: string           // only for ask_clarification
+}`
 
 // Parse command endpoint
 app.post('/api/parse-command', async (req, res) => {
@@ -44,46 +63,32 @@ app.post('/api/parse-command', async (req, res) => {
   const client = getOpenAIClient()
 
   if (!client) {
-    return res.status(503).json({
+    return res.json({
       ok: false,
-      error: 'LLM service not configured. Set OPENAI_API_KEY environment variable.',
+      error: 'LLM service not configured. Set OPENAI_API_KEY or use the in-app config panel.',
     })
   }
+
+  const systemPrompt = `You are a drawing command parser. Convert natural language Chinese drawing commands into a JSON object.
+
+Output ONLY a JSON object matching this schema:
+${OUTPUT_SCHEMA_TEXT}
+
+Rules:
+- Canvas size is 800x500 pixels.
+- For add_shape, always provide a "shape" object with at least "type".
+- Supported colors (hex): #ef4444 (red), #3b82f6 (blue), #22c55e (green), #eab308 (yellow), #111827 (black).
+- If the command is ambiguous, use "type": "ask_clarification" with a Chinese clarification message.
+- Do NOT wrap the JSON in markdown code fences. Output raw JSON only.`
 
   try {
     const completion = await client.chat.completions.create({
       model: getActiveModel(),
       messages: [
-        {
-          role: 'system',
-          content: `You are a drawing command parser. Convert natural language drawing commands into structured drawing actions.
-
-Supported actions:
-- add_shape: Add a shape (circle, rect, line, text)
-- clear_canvas: Clear the canvas
-- undo: Undo the last action
-- ask_clarification: Ask for clarification if the command is ambiguous
-
-For add_shape, provide shape details:
-- circle: x, y, radius, fill, stroke, lineWidth
-- rect: x, y, width, height, fill, stroke, lineWidth
-- line: x1, y1, x2, y2, stroke, lineWidth
-- text: x, y, text, fontSize, fill
-
-Canvas size: 800x500 pixels.
-Default colors: #ef4444 (red), #3b82f6 (blue), #22c55e (green), #eab308 (yellow), #111827 (black).
-
-If the command is ambiguous or unclear, use ask_clarification.`,
-        },
-        {
-          role: 'user',
-          content: text,
-        },
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: text },
       ],
-      response_format: {
-        type: 'json_schema',
-        json_schema: DRAWING_ACTION_SCHEMA,
-      },
+      response_format: { type: 'json_object' },
       temperature: 0.3,
       max_tokens: 500,
     })
@@ -94,36 +99,38 @@ If the command is ambiguous or unclear, use ask_clarification.`,
       return res.json({ ok: false, error: 'No response from LLM' })
     }
 
+    // Strip markdown fences if the model ignores the instruction
+    const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+
     try {
-      const parsed = JSON.parse(content)
+      const parsed = JSON.parse(cleaned)
       return res.json({ ok: true, action: parsed })
     } catch {
-      return res.json({ ok: false, error: 'Invalid JSON response from LLM' })
+      return res.json({ ok: false, error: 'Invalid JSON response from LLM', raw: cleaned.slice(0, 200) })
     }
   } catch (error) {
     console.error('LLM API error:', error)
-    return res.status(500).json({ ok: false, error: 'LLM API error' })
+    return res.json({ ok: false, error: 'LLM API error: ' + String(error).slice(0, 200) })
   }
 })
 
-// Runtime configuration endpoint
+// Runtime configuration endpoint - supports any OpenAI-compatible provider
 app.post('/api/config', (req, res) => {
-  const { apiKey, model } = req.body
+  const { apiKey, baseURL, model } = req.body
 
   if (!apiKey || typeof apiKey !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing apiKey parameter' })
   }
 
   runtimeApiKey = apiKey
-  if (model && typeof model === 'string') {
-    runtimeModel = model
-  }
+  if (baseURL && typeof baseURL === 'string') runtimeBaseURL = baseURL
+  if (model && typeof model === 'string') runtimeModel = model
 
-  // Reset client so it reinitializes with the new key
-  openai = null
+  openai = null // reinit client
 
   res.json({
     ok: true,
+    baseURL: getBaseURL(),
     model: getActiveModel(),
   })
 })
@@ -134,6 +141,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     llmConfigured: !!client,
+    baseURL: getBaseURL(),
     model: getActiveModel(),
   })
 })
@@ -142,4 +150,6 @@ app.get('/api/health', (req, res) => {
 app.listen(port, () => {
   console.log(`Server running on port ${port}`)
   console.log(`LLM configured: ${!!getOpenAIClient()}`)
+  console.log(`Base URL: ${getBaseURL()}`)
+  console.log(`Model: ${getActiveModel()}`)
 })

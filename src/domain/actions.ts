@@ -20,6 +20,10 @@ export type DrawingAction =
   | (CommandMeta & {
       type: 'undo'
     })
+  | (CommandMeta & {
+      type: 'parse_error'
+      message: string
+    })
 
 export type CommandRecord = {
   id: string

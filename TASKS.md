@@ -68,7 +68,7 @@ MVP 判断标准：
 | PR 3  | Done   | drawing-reducer              | feat: add drawing reducer and history            | -          | 2026-06-12   | useReducer / undo / history          |
 | PR 4  | Done   | speech-recognition           | feat: add automatic speech recognition           | -          | 2026-06-12   | 自动持续监听，不是点击开始                        |
 | PR 5  | Done   | local-parser                 | feat: add local command parser                   | -          | 2026-06-12   | 本地规则解析中文指令                           |
-| PR 6  | Todo   | feat/voice-to-canvas         | feat: connect voice commands to canvas actions   | -          | -            | 打通语音到绘图闭环                            |
+| PR 6  | Done   | voice-to-canvas              | feat: connect voice commands to canvas actions   | -          | 2026-06-12   | 打通语音到绘图闭环                            |
 | PR 7  | Todo   | feat/speech-feedback         | feat: add speech feedback                        | -          | -            | 语音反馈与回声保护                            |
 | PR 8  | Todo   | feat/llm-parser              | feat: add llm structured command parser          | -          | -            | OpenAI-compatible LLM 兜底            |
 | PR 9  | Todo   | feat/batch-actions           | feat: support batch actions and clarification    | -          | -            | 复杂指令拆解与澄清                            |
@@ -455,7 +455,7 @@ feat: add local command parser
 Branch:
 
 ```text
-feat/voice-to-canvas
+voice-to-canvas
 ```
 
 Title:
@@ -471,6 +471,7 @@ feat: connect voice commands to canvas actions
 * reducer 执行 action。
 * Canvas 更新。
 * history 展示原始语音、解析结果和执行状态。
+* 提供暂停监听 / 恢复监听安全控制，不作为绘图入口。
 
 涉及文件：
 
@@ -491,6 +492,7 @@ feat: connect voice commands to canvas actions
 * [ ] 说"撤销"后画布回退。
 * [ ] 无法解析时展示失败或澄清提示。
 * [ ] history 能看到 rawText、source、actionType、status。
+* [ ] 可以紧急暂停和恢复语音监听。
 * [ ] TASKS.md 更新 PR 6 状态。
 
 不包含：

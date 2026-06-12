@@ -9,6 +9,7 @@ import {
 } from './domain/reducer'
 import type { Shape } from './domain/shapes'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
+import { routeCommand } from './parser/commandRouter'
 import './App.css'
 
 const commandExamples = [
@@ -65,7 +66,11 @@ const devShapeTemplates: Shape[] = [
 function App() {
   const [state, dispatch] = useReducer(drawingReducer, initialDrawingState)
   const nextShapeIndexRef = useRef(0)
-  const speech = useSpeechRecognition()
+  const speech = useSpeechRecognition({
+    onFinalTranscript: (transcript) => {
+      dispatch(routeCommand(transcript))
+    },
+  })
 
   function createTimestamp() {
     return new Date().toISOString()
@@ -129,6 +134,8 @@ function App() {
           errorMessage={speech.errorMessage}
           isSupported={speech.isSupported}
           commandExamples={commandExamples}
+          onPauseListening={speech.pauseListening}
+          onResumeListening={speech.resumeListening}
         />
 
         <section className="canvas-area" aria-label="Canvas board">

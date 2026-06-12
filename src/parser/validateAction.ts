@@ -16,8 +16,12 @@ const MIN_FONT_SIZE = 12
 const MAX_FONT_SIZE = 72
 const MIN_LINE_WIDTH = 1
 const MAX_LINE_WIDTH = 20
+const MIN_POLYLINE_POINTS = 2
+const MAX_POLYLINE_POINTS = 10
 const MIN_POLYGON_POINTS = 3
 const MAX_POLYGON_POINTS = 8
+const MIN_ANGLE = -360
+const MAX_ANGLE = 360
 const JITTER_RANGE = 6
 
 function clamp(value: number, min: number, max: number): number {
@@ -34,6 +38,37 @@ function clampCoordinate(value: number, min: number, max: number): number {
 
 function isValidHexColor(color: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(color)
+}
+
+function validatePoints(
+  points: unknown,
+  minPoints: number,
+  maxPoints: number,
+): { x: number; y: number }[] | null {
+  if (!Array.isArray(points)) {
+    return null
+  }
+
+  const validated = points
+    .slice(0, maxPoints)
+    .map((point) => {
+      if (!point || typeof point !== 'object') {
+        return null
+      }
+
+      const p = point as Record<string, unknown>
+      if (typeof p.x !== 'number' || typeof p.y !== 'number') {
+        return null
+      }
+
+      return {
+        x: clampCoordinate(p.x, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X),
+        y: clampCoordinate(p.y, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y),
+      }
+    })
+    .filter((point): point is { x: number; y: number } => point !== null)
+
+  return validated.length >= minPoints ? validated : null
 }
 
 function validateShape(shape: unknown): Shape | null {
@@ -134,31 +169,27 @@ function validateShape(shape: unknown): Shape | null {
       }
     }
 
-    case 'polygon': {
-      if (!Array.isArray(s.points)) {
+    case 'polyline': {
+      const points = validatePoints(s.points, MIN_POLYLINE_POINTS, MAX_POLYLINE_POINTS)
+      if (!points) {
         return null
       }
 
-      const points = s.points
-        .slice(0, MAX_POLYGON_POINTS)
-        .map((point) => {
-          if (!point || typeof point !== 'object') {
-            return null
-          }
+      const stroke = typeof s.stroke === 'string' && isValidHexColor(s.stroke) ? s.stroke : '#111827'
+      const lineWidth = typeof s.lineWidth === 'number' ? clamp(s.lineWidth, MIN_LINE_WIDTH, MAX_LINE_WIDTH) : 4
 
-          const p = point as Record<string, unknown>
-          if (typeof p.x !== 'number' || typeof p.y !== 'number') {
-            return null
-          }
+      return {
+        id,
+        type: 'polyline',
+        points,
+        stroke,
+        lineWidth,
+      }
+    }
 
-          return {
-            x: clampCoordinate(p.x, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X),
-            y: clampCoordinate(p.y, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y),
-          }
-        })
-        .filter((point): point is { x: number; y: number } => point !== null)
-
-      if (points.length < MIN_POLYGON_POINTS) {
+    case 'polygon': {
+      const points = validatePoints(s.points, MIN_POLYGON_POINTS, MAX_POLYGON_POINTS)
+      if (!points) {
         return null
       }
 
@@ -171,6 +202,28 @@ function validateShape(shape: unknown): Shape | null {
         type: 'polygon',
         points,
         fill,
+        stroke,
+        lineWidth,
+      }
+    }
+
+    case 'arc': {
+      const x = clampCoordinate(typeof s.x === 'number' ? s.x : 400, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X)
+      const y = clampCoordinate(typeof s.y === 'number' ? s.y : 250, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y)
+      const radius = typeof s.radius === 'number' ? clamp(s.radius, MIN_RADIUS, MAX_RADIUS) : 60
+      const startAngle = typeof s.startAngle === 'number' ? clamp(s.startAngle, MIN_ANGLE, MAX_ANGLE) : 0
+      const endAngle = typeof s.endAngle === 'number' ? clamp(s.endAngle, MIN_ANGLE, MAX_ANGLE) : 180
+      const stroke = typeof s.stroke === 'string' && isValidHexColor(s.stroke) ? s.stroke : '#111827'
+      const lineWidth = typeof s.lineWidth === 'number' ? clamp(s.lineWidth, MIN_LINE_WIDTH, MAX_LINE_WIDTH) : 4
+
+      return {
+        id,
+        type: 'arc',
+        x,
+        y,
+        radius,
+        startAngle,
+        endAngle,
         stroke,
         lineWidth,
       }

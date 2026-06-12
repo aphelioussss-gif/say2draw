@@ -32,8 +32,16 @@ export function getActionFeedback(action: DrawingAction): string {
       return '已为你画了一条线'
     }
 
+    if (action.shape.type === 'polyline') {
+      return '已为你画了一条折线'
+    }
+
     if (action.shape.type === 'polygon') {
       return '已为你画了一个多边形'
+    }
+
+    if (action.shape.type === 'arc') {
+      return '已为你画了一段弧线'
     }
 
     return '已写上文字'

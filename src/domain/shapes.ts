@@ -39,6 +39,16 @@ export type LineShape = ShapeBase & {
   y2: number
 }
 
+export type PolylinePoint = {
+  x: number
+  y: number
+}
+
+export type PolylineShape = ShapeBase & {
+  type: 'polyline'
+  points: PolylinePoint[]
+}
+
 export type PolygonPoint = {
   x: number
   y: number
@@ -47,6 +57,15 @@ export type PolygonPoint = {
 export type PolygonShape = ShapeBase & {
   type: 'polygon'
   points: PolygonPoint[]
+}
+
+export type ArcShape = ShapeBase & {
+  type: 'arc'
+  x: number
+  y: number
+  radius: number
+  startAngle: number
+  endAngle: number
 }
 
 export type TextShape = ShapeBase & {
@@ -58,4 +77,12 @@ export type TextShape = ShapeBase & {
   align?: CanvasTextAlign
 }
 
-export type Shape = CircleShape | EllipseShape | RectShape | LineShape | PolygonShape | TextShape
+export type Shape =
+  | CircleShape
+  | EllipseShape
+  | RectShape
+  | LineShape
+  | PolylineShape
+  | PolygonShape
+  | ArcShape
+  | TextShape

@@ -194,6 +194,30 @@
   list-style: none;
 }
 
+.dev-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dev-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(234, 179, 8, 0.52);
+  border-radius: 6px;
+  color: var(--text-primary);
+  background: rgba(234, 179, 8, 0.14);
+  cursor: pointer;
+}
+
+.dev-actions button:disabled {
+  color: var(--text-muted);
+  border-color: rgba(72, 79, 88, 0.8);
+  background: rgba(72, 79, 88, 0.18);
+  cursor: not-allowed;
+}
+
 .dev-controls li {
   padding: 4px 8px;
   border: 1px solid rgba(234, 179, 8, 0.45);
@@ -223,6 +247,18 @@
   color: var(--accent-green);
 }
 
+.history-source.dev {
+  color: var(--accent-yellow);
+}
+
+.history-source.llm {
+  color: var(--accent);
+}
+
+.history-source.unknown {
+  color: var(--text-secondary);
+}
+
 .history-item p {
   margin: 0 0 4px;
   color: var(--text-primary);
@@ -231,6 +267,19 @@
 
 .history-item span {
   color: var(--text-secondary);
+}
+
+.history-item small {
+  margin-top: 4px;
+  display: block;
+  color: var(--text-muted);
+}
+
+.history-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 13px;
 }
 
 @keyframes pulse {

@@ -1,5 +1,11 @@
+import { useReducer, useRef } from 'react'
 import { CanvasBoard } from './components/CanvasBoard'
+import { CommandHistory } from './components/CommandHistory'
 import { DevControls } from './components/DevControls'
+import {
+  drawingReducer,
+  initialDrawingState,
+} from './domain/reducer'
 import type { Shape } from './domain/shapes'
 import './App.css'
 
@@ -11,30 +17,9 @@ const commandExamples = [
   '画一个太阳、两朵云和一棵树',
 ]
 
-const historyItems = [
+const devShapeTemplates: Shape[] = [
   {
-    source: 'local',
-    transcript: '画一个红色圆形',
-    action: 'add_shape',
-    status: 'ready',
-  },
-  {
-    source: 'local',
-    transcript: '撤销上一步',
-    action: 'undo',
-    status: 'ready',
-  },
-  {
-    source: 'llm',
-    transcript: '画一个太阳、两朵云和一棵树',
-    action: 'batch_actions',
-    status: 'planned',
-  },
-]
-
-const devShapes: Shape[] = [
-  {
-    id: 'demo-circle',
+    id: 'template-circle',
     type: 'circle',
     x: 150,
     y: 150,
@@ -44,7 +29,7 @@ const devShapes: Shape[] = [
     lineWidth: 4,
   },
   {
-    id: 'demo-rect',
+    id: 'template-rect',
     type: 'rect',
     x: 500,
     y: 92,
@@ -55,7 +40,7 @@ const devShapes: Shape[] = [
     lineWidth: 4,
   },
   {
-    id: 'demo-line',
+    id: 'template-line',
     type: 'line',
     x1: 190,
     y1: 330,
@@ -65,7 +50,7 @@ const devShapes: Shape[] = [
     lineWidth: 6,
   },
   {
-    id: 'demo-text',
+    id: 'template-text',
     type: 'text',
     x: 400,
     y: 260,
@@ -76,6 +61,50 @@ const devShapes: Shape[] = [
 ]
 
 function App() {
+  const [state, dispatch] = useReducer(drawingReducer, initialDrawingState)
+  const nextShapeIndexRef = useRef(0)
+
+  function createTimestamp() {
+    return new Date().toISOString()
+  }
+
+  function handleAddShape() {
+    const index = nextShapeIndexRef.current
+    const template = devShapeTemplates[index % devShapeTemplates.length]
+    const shape = {
+      ...template,
+      id: `dev-${template.type}-${index}`,
+    }
+
+    nextShapeIndexRef.current += 1
+
+    dispatch({
+      type: 'add_shape',
+      shape,
+      rawText: `DEV add ${shape.type}`,
+      parseSource: 'dev',
+      createdAt: createTimestamp(),
+    })
+  }
+
+  function handleClearCanvas() {
+    dispatch({
+      type: 'clear_canvas',
+      rawText: 'DEV clear canvas',
+      parseSource: 'dev',
+      createdAt: createTimestamp(),
+    })
+  }
+
+  function handleUndo() {
+    dispatch({
+      type: 'undo',
+      rawText: 'DEV undo',
+      parseSource: 'dev',
+      createdAt: createTimestamp(),
+    })
+  }
+
   return (
     <main className="app-shell" aria-label="Say2Draw application scaffold">
       <header className="status-bar">
@@ -103,7 +132,7 @@ function App() {
 
           <section className="voice-card">
             <p className="label">系统反馈</p>
-            <p className="content">PR 1 只搭建基础页面，后续 PR 接入自动监听。</p>
+            <p className="content">PR 3 已接入 reducer，后续 PR 接入自动监听。</p>
           </section>
 
           <section className="demo-prompts" aria-label="Demo command examples">
@@ -118,8 +147,14 @@ function App() {
 
         <section className="canvas-area" aria-label="Canvas board">
           <div className="canvas-stage">
-            <CanvasBoard shapes={devShapes} />
-            <DevControls shapes={devShapes} />
+            <CanvasBoard shapes={state.shapes} />
+            <DevControls
+              shapes={state.shapes}
+              canUndo={state.past.length > 0}
+              onAddShape={handleAddShape}
+              onClearCanvas={handleClearCanvas}
+              onUndo={handleUndo}
+            />
           </div>
         </section>
 
@@ -128,19 +163,7 @@ function App() {
             <h2>Command History</h2>
           </div>
 
-          <ol className="history-list">
-            {historyItems.map((item) => (
-              <li className="history-item" key={`${item.source}-${item.action}`}>
-                <div className="history-source">[{item.source}]</div>
-                <div>
-                  <p>{item.transcript}</p>
-                  <span>
-                    -&gt; {item.action} {item.status}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ol>
+          <CommandHistory records={state.history} />
         </aside>
       </section>
     </main>

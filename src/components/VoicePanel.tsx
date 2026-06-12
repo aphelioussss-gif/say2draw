@@ -7,6 +7,8 @@ type VoicePanelProps = {
   errorMessage: string
   isSupported: boolean
   commandExamples: string[]
+  onPauseListening: () => void
+  onResumeListening: () => void
 }
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
@@ -14,6 +16,7 @@ const STATUS_LABEL: Record<VoiceStatus, string> = {
   permission_required: 'Permission required / 等待麦克风权限',
   listening: 'Listening / 正在聆听',
   processing: 'Processing / 处理识别结果',
+  paused: 'Paused / 已暂停监听',
   error: 'Error / 识别异常',
   unsupported: 'Unsupported / 浏览器不支持',
 }
@@ -41,7 +44,12 @@ export function VoicePanel({
   errorMessage,
   isSupported,
   commandExamples,
+  onPauseListening,
+  onResumeListening,
 }: VoicePanelProps) {
+  const isPaused = status === 'paused'
+  const canControlListening = isSupported && status !== 'unsupported'
+
   return (
     <aside className="voice-panel" aria-label="Voice recognition status">
       <div className="panel-heading">
@@ -52,6 +60,15 @@ export function VoicePanel({
       <section className="voice-card">
         <p className="label">状态</p>
         <p className="content">{STATUS_LABEL[status]}</p>
+        <div className="voice-actions">
+          <button
+            type="button"
+            onClick={isPaused ? onResumeListening : onPauseListening}
+            disabled={!canControlListening}
+          >
+            {isPaused ? '恢复监听' : '暂停监听'}
+          </button>
+        </div>
       </section>
 
       <section className="voice-card">
@@ -73,7 +90,7 @@ export function VoicePanel({
         <p className={`content ${errorMessage ? 'error-text' : ''}`}>
           {errorMessage ||
             (isSupported
-              ? 'PR 4 只识别语音文本，后续 PR 再解析并执行绘图。'
+              ? 'PR 6 已将语音指令接入本地解析器和画布执行。'
               : '建议使用 Chrome 打开本项目。')}
         </p>
       </section>

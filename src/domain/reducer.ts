@@ -80,5 +80,12 @@ export function drawingReducer(
     }
   }
 
+  if (action.type === 'parse_error') {
+    return {
+      ...state,
+      history: pushHistory(state, createRecord(action, 'error', action.message)),
+    }
+  }
+
   return state
 }

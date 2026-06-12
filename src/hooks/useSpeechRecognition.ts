@@ -5,6 +5,7 @@ export type VoiceStatus =
   | 'permission_required'
   | 'listening'
   | 'processing'
+  | 'paused'
   | 'error'
   | 'unsupported'
 
@@ -19,6 +20,8 @@ type SpeechRecognitionResult = {
   finalTranscript: string
   errorMessage: string
   isSupported: boolean
+  pauseListening: () => void
+  resumeListening: () => void
 }
 
 type SpeechRecognitionLike = {
@@ -92,6 +95,31 @@ export function useSpeechRecognition({
     onFinalTranscriptRef.current = onFinalTranscript
   }, [onFinalTranscript])
 
+  function pauseListening() {
+    shouldListenRef.current = false
+    setInterimTranscript('')
+    setStatus('paused')
+    recognitionRef.current?.stop()
+  }
+
+  function resumeListening() {
+    if (!isSupported) {
+      return
+    }
+
+    shouldListenRef.current = true
+    setErrorMessage('')
+
+    try {
+      recognitionRef.current?.start()
+    } catch {
+      window.setTimeout(() => {
+        setStatus('permission_required')
+        setErrorMessage('请允许浏览器麦克风权限后刷新页面。')
+      }, 0)
+    }
+  }
+
   useEffect(() => {
     if (!isSupported) {
       return
@@ -105,6 +133,7 @@ export function useSpeechRecognition({
 
     const recognition = new Recognition()
     recognitionRef.current = recognition
+    shouldListenRef.current = true
     recognition.continuous = true
     recognition.interimResults = true
     recognition.lang = lang
@@ -157,6 +186,7 @@ export function useSpeechRecognition({
 
     recognition.onend = () => {
       if (!shouldListenRef.current) {
+        setStatus('paused')
         return
       }
 
@@ -194,5 +224,7 @@ export function useSpeechRecognition({
     finalTranscript,
     errorMessage,
     isSupported,
+    pauseListening,
+    resumeListening,
   }
 }

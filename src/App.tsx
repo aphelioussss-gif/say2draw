@@ -9,10 +9,11 @@ import {
   initialDrawingState,
 } from './domain/reducer'
 import type { Shape } from './domain/shapes'
+import type { DrawingAction } from './domain/actions'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
 import { useLLMStatus } from './hooks/useLLMStatus'
-import { routeCommand } from './parser/commandRouter'
+import { routeCommands } from './parser/commandRouter'
 import './App.css'
 
 const commandExamples = [
@@ -78,18 +79,28 @@ function App() {
       speech.pauseListening()
       setFeedbackMessage('思考中...')
 
-      routeCommand(transcript).then((action) => {
+      routeCommands(transcript).then((actions) => {
+        executeBatch(actions, 0)
+      })
+
+      function executeBatch(actions: DrawingAction[], index: number) {
+        if (index >= actions.length) {
+          if (!speech.isManuallyPausedRef.current) {
+            speech.resumeListening()
+          }
+          return
+        }
+
+        const action = actions[index]
         const message = getActionFeedback(action)
         dispatch(action)
         setFeedbackMessage(message)
         speechFeedback.speak(message, {
           onEnd: () => {
-            if (!speech.isManuallyPausedRef.current) {
-              speech.resumeListening()
-            }
+            executeBatch(actions, index + 1)
           },
         })
-      })
+      }
     },
   })
 

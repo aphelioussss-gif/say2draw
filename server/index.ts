@@ -12,19 +12,25 @@ app.use(express.json())
 
 // OpenAI client - only initialize if API key is available
 let openai: OpenAI | null = null
+let runtimeApiKey: string | null = null
+let runtimeModel: string | null = null
 
 function getOpenAIClient(): OpenAI | null {
-  if (openai) {
-    return openai
-  }
-
-  const apiKey = process.env.OPENAI_API_KEY
+  const apiKey = runtimeApiKey || process.env.OPENAI_API_KEY
   if (!apiKey) {
     return null
   }
 
+  if (openai) {
+    return openai
+  }
+
   openai = new OpenAI({ apiKey })
   return openai
+}
+
+function getActiveModel(): string {
+  return runtimeModel || process.env.OPENAI_MODEL || 'gpt-4o-mini'
 }
 
 // Parse command endpoint
@@ -46,7 +52,7 @@ app.post('/api/parse-command', async (req, res) => {
 
   try {
     const completion = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      model: getActiveModel(),
       messages: [
         {
           role: 'system',
@@ -100,13 +106,35 @@ If the command is ambiguous or unclear, use ask_clarification.`,
   }
 })
 
+// Runtime configuration endpoint
+app.post('/api/config', (req, res) => {
+  const { apiKey, model } = req.body
+
+  if (!apiKey || typeof apiKey !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Missing apiKey parameter' })
+  }
+
+  runtimeApiKey = apiKey
+  if (model && typeof model === 'string') {
+    runtimeModel = model
+  }
+
+  // Reset client so it reinitializes with the new key
+  openai = null
+
+  res.json({
+    ok: true,
+    model: getActiveModel(),
+  })
+})
+
 // Health check
 app.get('/api/health', (req, res) => {
   const client = getOpenAIClient()
   res.json({
     ok: true,
     llmConfigured: !!client,
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    model: getActiveModel(),
   })
 })
 

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { VoiceStatus } from '../hooks/useSpeechRecognition'
 import type { LLMStatus } from '../hooks/useLLMStatus'
 import { FeedbackPanel } from './FeedbackPanel'
@@ -72,6 +73,31 @@ export function VoicePanel({
 }: VoicePanelProps) {
   const isPaused = status === 'paused'
   const canControlListening = isSupported && status !== 'unsupported'
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+  async function handleSaveApiKey() {
+    if (!apiKeyInput.trim()) return
+
+    setConfigStatus('saving')
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: apiKeyInput.trim() }),
+      })
+
+      if (res.ok) {
+        setConfigStatus('saved')
+        setApiKeyInput('')
+        window.setTimeout(() => window.location.reload(), 1500)
+      } else {
+        setConfigStatus('error')
+      }
+    } catch {
+      setConfigStatus('error')
+    }
+  }
 
   return (
     <aside className="voice-panel" aria-label="Voice recognition status">
@@ -125,7 +151,7 @@ export function VoicePanel({
       />
 
       <section className="voice-card feedback-card" aria-label="LLM status">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
           <span
             className={`status-dot ${getLLMStatusDotClass(llmStatus)}`}
             aria-hidden="true"
@@ -134,11 +160,64 @@ export function VoicePanel({
             {LLM_STATUS_LABEL[llmStatus]}
           </p>
         </div>
+
+        {llmStatus === 'not_configured' && (
+          <div style={{ marginTop: 4 }}>
+            <input
+              type="password"
+              placeholder="输入 OpenAI API Key"
+              value={apiKeyInput}
+              onChange={(e) => {
+                setApiKeyInput(e.target.value)
+                if (configStatus === 'error') setConfigStatus('idle')
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveApiKey()
+              }}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                fontSize: 12,
+                fontFamily: 'var(--mono)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                background: 'var(--surface)',
+                color: 'var(--text)',
+                boxSizing: 'border-box',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              <button
+                type="button"
+                onClick={handleSaveApiKey}
+                disabled={!apiKeyInput.trim() || configStatus === 'saving'}
+                style={{
+                  padding: '4px 12px',
+                  fontSize: 12,
+                  cursor: apiKeyInput.trim() ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {configStatus === 'saving' ? '保存中...' : '保存'}
+              </button>
+              {configStatus === 'saved' && (
+                <span style={{ fontSize: 12, color: '#22c55e', lineHeight: '26px' }}>
+                  ✓ 已保存，刷新页面生效
+                </span>
+              )}
+              {configStatus === 'error' && (
+                <span style={{ fontSize: 12, color: '#ef4444', lineHeight: '26px' }}>
+                  保存失败，请确认服务端已启动
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         <p className="feedback-meta">
           {llmStatus === 'configured'
             ? '复杂指令将调用 AI 解析'
             : llmStatus === 'not_configured'
-              ? '复杂指令将提示澄清，不影响本地指令'
+              ? '复制 .env.example 为 .env 并填入 Key，或在上方直接输入'
               : llmStatus === 'checking'
                 ? '正在检测 AI 服务...'
                 : 'AI 服务不可用，本地指令不受影响'}

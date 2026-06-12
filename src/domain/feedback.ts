@@ -1,11 +1,17 @@
 import type { DrawingAction } from './actions'
 
-function getObjectLabel(rawText: string): string | null {
-  if (rawText.includes('太阳')) return '一个太阳'
-  if (rawText.includes('笑脸')) return '一个笑脸'
-  if (rawText.includes('树')) return '一棵树'
-  if (rawText.includes('房子') || rawText.includes('房屋')) return '一座房子'
-  return null
+function extractDrawingTarget(rawText: string): string | null {
+  const normalized = rawText.replace(/\s+/g, '')
+  const match = normalized.match(/(?:给我|帮我|请)?(?:画|绘制)(.+?)(?:[，。,.！!？?]|$)/)
+  const target = match?.[1]
+    .replace(/^(一个|一只|一棵|一座|一条|一朵|一片|个|只|棵|座|条|朵|片)/, '')
+    .trim()
+
+  if (!target || target.length > 12) {
+    return null
+  }
+
+  return target
 }
 
 export function getActionFeedback(action: DrawingAction): string {
@@ -48,12 +54,12 @@ export function getBatchFeedback(actions: DrawingAction[], rawText: string): str
   const actionableCount = actions.filter((action) => action.type !== 'parse_error').length
 
   if (actionableCount > 1) {
-    const objectLabel = getObjectLabel(rawText)
-    if (objectLabel) {
-      return `已为你画了${objectLabel}`
+    const target = extractDrawingTarget(rawText)
+    if (target) {
+      return `已为你画了${target}`
     }
 
-    return `已为你完成 ${actionableCount} 个绘图步骤`
+    return '已按你的描述完成绘图'
   }
 
   return getActionFeedback(actions[0])

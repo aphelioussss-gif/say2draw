@@ -107,6 +107,8 @@ When the user describes an object or scene, follow these rules:
 3. Use POSITION to show relationship: eyes INSIDE face, roof ABOVE wall, rays AROUND center.
 4. Vary SIZES: main body bigger, details smaller.
 5. If you CANNOT decompose meaningfully, use ask_clarification.
+6. Never represent a complex object with only one primitive unless the user explicitly asks for that primitive shape.
+7. For people, animals, plants, buildings, or natural objects, identify semantic parts first, then map each part to primitives.
 
 === Composition ===
 - Do NOT place every object at canvas center (400, 250).

@@ -12,6 +12,7 @@ export type VoiceStatus =
 type SpeechRecognitionHookOptions = {
   lang?: string
   onFinalTranscript?: (transcript: string) => void
+  shouldIgnoreResult?: () => boolean
 }
 
 type SpeechRecognitionResult = {
@@ -22,6 +23,7 @@ type SpeechRecognitionResult = {
   isSupported: boolean
   pauseListening: () => void
   resumeListening: () => void
+  isManuallyPaused: boolean
 }
 
 type SpeechRecognitionLike = {
@@ -76,12 +78,15 @@ function getErrorMessage(error: string, fallback?: string) {
 export function useSpeechRecognition({
   lang = 'zh-CN',
   onFinalTranscript,
+  shouldIgnoreResult,
 }: SpeechRecognitionHookOptions = {}): SpeechRecognitionResult {
   const isSupported =
     typeof window !== 'undefined' && getSpeechRecognitionConstructor() !== null
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const shouldListenRef = useRef(true)
+  const isManuallyPausedRef = useRef(false)
   const onFinalTranscriptRef = useRef(onFinalTranscript)
+  const shouldIgnoreResultRef = useRef(shouldIgnoreResult)
   const [status, setStatus] = useState<VoiceStatus>(() =>
     isSupported ? 'booting' : 'unsupported',
   )
@@ -90,13 +95,20 @@ export function useSpeechRecognition({
   const [errorMessage, setErrorMessage] = useState(() =>
     isSupported ? '' : '当前浏览器不支持 Web Speech API，建议使用 Chrome。',
   )
+  const [isManuallyPaused, setIsManuallyPaused] = useState(false)
 
   useEffect(() => {
     onFinalTranscriptRef.current = onFinalTranscript
   }, [onFinalTranscript])
 
+  useEffect(() => {
+    shouldIgnoreResultRef.current = shouldIgnoreResult
+  }, [shouldIgnoreResult])
+
   function pauseListening() {
     shouldListenRef.current = false
+    isManuallyPausedRef.current = true
+    setIsManuallyPaused(true)
     setInterimTranscript('')
     setStatus('paused')
     recognitionRef.current?.stop()
@@ -108,6 +120,8 @@ export function useSpeechRecognition({
     }
 
     shouldListenRef.current = true
+    isManuallyPausedRef.current = false
+    setIsManuallyPaused(false)
     setErrorMessage('')
 
     try {
@@ -144,6 +158,11 @@ export function useSpeechRecognition({
     }
 
     recognition.onresult = (event: SpeechRecognitionEventLike) => {
+      if (shouldIgnoreResultRef.current?.()) {
+        setInterimTranscript('')
+        return
+      }
+
       let interimText = ''
       let finalText = ''
 
@@ -210,6 +229,7 @@ export function useSpeechRecognition({
 
     return () => {
       shouldListenRef.current = false
+      isManuallyPausedRef.current = false
       recognition.onstart = null
       recognition.onresult = null
       recognition.onerror = null
@@ -226,5 +246,6 @@ export function useSpeechRecognition({
     isSupported,
     pauseListening,
     resumeListening,
+    isManuallyPaused,
   }
 }

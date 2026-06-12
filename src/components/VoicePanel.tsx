@@ -1,4 +1,5 @@
 import type { VoiceStatus } from '../hooks/useSpeechRecognition'
+import { FeedbackPanel } from './FeedbackPanel'
 
 type VoicePanelProps = {
   status: VoiceStatus
@@ -9,6 +10,9 @@ type VoicePanelProps = {
   commandExamples: string[]
   onPauseListening: () => void
   onResumeListening: () => void
+  feedbackMessage: string
+  isFeedbackSpeaking: boolean
+  isFeedbackVoiceSupported: boolean
 }
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
@@ -46,6 +50,9 @@ export function VoicePanel({
   commandExamples,
   onPauseListening,
   onResumeListening,
+  feedbackMessage,
+  isFeedbackSpeaking,
+  isFeedbackVoiceSupported,
 }: VoicePanelProps) {
   const isPaused = status === 'paused'
   const canControlListening = isSupported && status !== 'unsupported'
@@ -94,6 +101,12 @@ export function VoicePanel({
               : '建议使用 Chrome 打开本项目。')}
         </p>
       </section>
+
+      <FeedbackPanel
+        message={feedbackMessage}
+        isSpeaking={isFeedbackSpeaking}
+        isVoiceSupported={isFeedbackVoiceSupported}
+      />
 
       <section className="demo-prompts" aria-label="Demo command examples">
         <p className="label">试着说</p>

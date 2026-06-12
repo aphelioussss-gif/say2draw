@@ -22,7 +22,7 @@ Say2Draw 的核心价值：**可控、可累积、可中断的语音绘图体验
 
 ## 当前进度
 
-当前处于 PR 6：语音到绘图闭环阶段。
+当前处于 PR 7：语音反馈与回声保护阶段。
 
 已完成：
 
@@ -34,10 +34,11 @@ Say2Draw 的核心价值：**可控、可累积、可中断的语音绘图体验
 - 中文本地规则 parser
 - 语音 final text → local parser → reducer → Canvas 绘图闭环
 - 紧急暂停/恢复监听控制
+- SpeechSynthesis 语音反馈
+- 系统播报期间忽略识别结果，避免回声触发
 
 暂未完成：
 
-- 语音反馈与回声保护
 - OpenAI-compatible LLM 兜底
 
 ## 核心特性

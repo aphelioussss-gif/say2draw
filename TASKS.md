@@ -69,7 +69,7 @@ MVP 判断标准：
 | PR 4  | Done   | speech-recognition           | feat: add automatic speech recognition           | -          | 2026-06-12   | 自动持续监听，不是点击开始                        |
 | PR 5  | Done   | local-parser                 | feat: add local command parser                   | -          | 2026-06-12   | 本地规则解析中文指令                           |
 | PR 6  | Done   | voice-to-canvas              | feat: connect voice commands to canvas actions   | -          | 2026-06-12   | 打通语音到绘图闭环                            |
-| PR 7  | Todo   | feat/speech-feedback         | feat: add speech feedback                        | -          | -            | 语音反馈与回声保护                            |
+| PR 7  | Done   | speech-feedback              | feat: add speech feedback                        | -          | 2026-06-12   | 语音反馈与回声保护                            |
 | PR 8  | Todo   | feat/llm-parser              | feat: add llm structured command parser          | -          | -            | OpenAI-compatible LLM 兜底            |
 | PR 9  | Todo   | feat/batch-actions           | feat: support batch actions and clarification    | -          | -            | 复杂指令拆解与澄清                            |
 | PR 10 | Todo   | docs/finalize-submission     | docs: finalize readme design doc and demo script | -          | -            | README / DESIGN / Demo 视频            |

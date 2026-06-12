@@ -491,6 +491,10 @@ You must implement echo protection:
 PR 7 implements this with `useSpeechSynthesis`, `shouldIgnoreResult`, and
 pause/resume coordination between synthesis and recognition.
 
+PR 8 fixes two edge cases:
+1. **State sync**: `isManuallyPaused` captured in closure was stale in async `onEnd` callback. Fixed by exposing `isManuallyPausedRef`.
+2. **Concurrent speaks**: Rapid `speak()` calls lost previous `onEnd` callbacks. Fixed by storing and invoking pending callbacks on `cancel()`.
+
 ### Browser Compatibility
 
 Assume Web Speech API may not work in all browsers.

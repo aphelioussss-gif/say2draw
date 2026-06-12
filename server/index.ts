@@ -77,7 +77,8 @@ Rules:
 - Canvas size is 800x500 pixels.
 - For add_shape, always provide a "shape" object with at least "type".
 - Supported colors (hex): #ef4444 (red), #3b82f6 (blue), #22c55e (green), #eab308 (yellow), #111827 (black).
-- If the command is ambiguous, use "type": "ask_clarification" with a Chinese clarification message.
+- You can map common concepts to shapes: sun=circle, tree=rect+circle, house=rect+triangle, etc.
+- IMPORTANT: If the command mentions a real-world object that does NOT map to a clear circle/rect/line/text (like "牛奶", "汽车", "手机"), you MUST use "type": "ask_clarification" with a Chinese message asking what shape to use.
 - Do NOT wrap the JSON in markdown code fences. Output raw JSON only.`
 
   try {

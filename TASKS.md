@@ -70,9 +70,10 @@ MVP 判断标准：
 | PR 5  | Done   | local-parser                 | feat: add local command parser                   | -          | 2026-06-12   | 本地规则解析中文指令                           |
 | PR 6  | Done   | voice-to-canvas              | feat: connect voice commands to canvas actions   | -          | 2026-06-12   | 打通语音到绘图闭环                            |
 | PR 7  | Done   | speech-feedback              | feat: add speech feedback                        | -          | 2026-06-12   | 语音反馈与回声保护                            |
-| PR 8  | Todo   | feat/llm-parser              | feat: add llm structured command parser          | -          | -            | OpenAI-compatible LLM 兜底            |
-| PR 9  | Todo   | feat/batch-actions           | feat: support batch actions and clarification    | -          | -            | 复杂指令拆解与澄清                            |
-| PR 10 | Todo   | docs/finalize-submission     | docs: finalize readme design doc and demo script | -          | -            | README / DESIGN / Demo 视频            |
+| PR 8  | Review | fix/speech-feedback-sync     | fix: resolve speech feedback sync issues         | -          | -            | 修复状态同步和并发问题                            |
+| PR 9  | Todo   | feat/llm-parser              | feat: add llm structured command parser          | -          | -            | OpenAI-compatible LLM 兜底            |
+| PR 10 | Todo   | feat/batch-actions           | feat: support batch actions and clarification    | -          | -            | 复杂指令拆解与澄清                            |
+| PR 11 | Todo   | docs/finalize-submission     | docs: finalize readme design doc and demo script | -          | -            | README / DESIGN / Demo 视频            |
 
 Status 可选值：
 
@@ -566,7 +567,67 @@ feat: add speech feedback
 
 ---
 
-### PR 8：OpenAI-compatible LLM 复杂指令解析
+### PR 8：修复语音反馈同步问题
+
+Branch:
+
+```text
+fix/speech-feedback-sync
+```
+
+Title:
+
+```text
+fix: resolve speech feedback sync issues
+```
+
+目标：
+
+* 修复 PR 7 代码审查中发现的状态同步问题。
+* 修复并发场景下的回调丢失问题。
+* 确保语音反馈系统在边界情况下行为正确。
+
+涉及文件：
+
+* `src/hooks/useSpeechRecognition.ts`
+* `src/hooks/useSpeechSynthesis.ts`
+* `src/App.tsx`
+
+问题描述：
+
+1. **状态同步问题（严重）**：`isManuallyPaused` 在异步回调中通过闭包捕获，如果用户在语音播报期间手动暂停监听，回调读取的是旧值。
+2. **并发场景问题（中等）**：快速连续调用 `speak()` 时，`cancel()` 会取消所有语音，但之前的 `onEnd` 回调不会被调用，导致状态不一致。
+
+修复方案：
+
+1. 在 `useSpeechRecognition` 中暴露 `isManuallyPausedRef`（ref 类型）。
+2. 在 `App.tsx` 的 `onEnd` 回调中使用 `speech.isManuallyPausedRef.current` 访问最新值。
+3. 在 `useSpeechSynthesis` 中添加 `onEndCallbackRef` 保存当前回调。
+4. 在 `cancel()` 中先调用待处理的 `onEnd` 回调，再取消语音。
+
+验收标准：
+
+* [x] `npm run lint` 通过。
+* [x] `npm run build` 通过。
+* [x] 快速连续指令测试通过。
+* [x] 播报期间手动暂停测试通过。
+* [ ] PR 合并后主分支可运行。
+
+不包含：
+
+* 不添加新功能。
+* 不改变现有 API 接口。
+* 不引入新依赖。
+
+建议 commit:
+
+```text
+fix: resolve speech feedback sync issues
+```
+
+---
+
+### PR 9：OpenAI-compatible LLM 复杂指令解析
 
 Branch:
 
@@ -629,7 +690,7 @@ feat: add llm structured command parser
 
 ---
 
-### PR 9：batch_actions 与模糊指令澄清
+### PR 10：batch_actions 与模糊指令澄清
 
 Branch:
 
@@ -668,7 +729,7 @@ feat: support batch actions and clarification
 * [ ] "画一个东西"会触发澄清，而不是乱画。
 * [ ] history 展示 batch 结果。
 * [ ] DESIGN 更新复杂指令与澄清能力。
-* [ ] TASKS.md 更新 PR 9 状态。
+* [ ] TASKS.md 更新 PR 10 状态。
 
 不包含：
 
@@ -684,7 +745,7 @@ feat: support batch actions and clarification
 
 ---
 
-### PR 10：文档、Demo 视频与最终提交整理
+### PR 11：文档、Demo 视频与最终提交整理
 
 Branch:
 
@@ -884,7 +945,7 @@ Notes:
 
 ### PR & Commit
 
-* [ ] 至少 8 个有效 PR。
+* [ ] 至少 11 个有效 PR。
 * [ ] 每个 PR 只做一件事。
 * [ ] 每个 PR 标题清楚。
 * [ ] 每个 PR 描述完整。

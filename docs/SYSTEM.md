@@ -488,6 +488,9 @@ You must implement echo protection:
 4. Restart recognition in `onend` if needed.
 5. Avoid executing system feedback as user commands.
 
+PR 7 implements this with `useSpeechSynthesis`, `shouldIgnoreResult`, and
+pause/resume coordination between synthesis and recognition.
+
 ### Browser Compatibility
 
 Assume Web Speech API may not work in all browsers.

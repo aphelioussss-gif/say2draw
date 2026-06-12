@@ -163,6 +163,18 @@
   color: #fca5a5;
 }
 
+.feedback-card {
+  border-color: rgba(59, 130, 246, 0.48);
+}
+
+.feedback-meta {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .demo-prompts ul,
 .history-list {
   margin: 0;

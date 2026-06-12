@@ -1,14 +1,16 @@
-import { useReducer, useRef } from 'react'
+import { useRef, useReducer, useState } from 'react'
 import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
 import { DevControls } from './components/DevControls'
 import { VoicePanel } from './components/VoicePanel'
+import { getActionFeedback } from './domain/feedback'
 import {
   drawingReducer,
   initialDrawingState,
 } from './domain/reducer'
 import type { Shape } from './domain/shapes'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
+import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
 import { routeCommand } from './parser/commandRouter'
 import './App.css'
 
@@ -65,10 +67,25 @@ const devShapeTemplates: Shape[] = [
 
 function App() {
   const [state, dispatch] = useReducer(drawingReducer, initialDrawingState)
+  const [feedbackMessage, setFeedbackMessage] = useState('')
   const nextShapeIndexRef = useRef(0)
+  const speechFeedback = useSpeechSynthesis()
   const speech = useSpeechRecognition({
+    shouldIgnoreResult: () => speechFeedback.isSpeaking,
     onFinalTranscript: (transcript) => {
-      dispatch(routeCommand(transcript))
+      const action = routeCommand(transcript)
+      const message = getActionFeedback(action)
+
+      speech.pauseListening()
+      dispatch(action)
+      setFeedbackMessage(message)
+      speechFeedback.speak(message, {
+        onEnd: () => {
+          if (!speech.isManuallyPaused) {
+            speech.resumeListening()
+          }
+        },
+      })
     },
   })
 
@@ -93,6 +110,7 @@ function App() {
       parseSource: 'dev',
       createdAt: createTimestamp(),
     })
+    setFeedbackMessage('已添加开发测试图形')
   }
 
   function handleClearCanvas() {
@@ -102,6 +120,7 @@ function App() {
       parseSource: 'dev',
       createdAt: createTimestamp(),
     })
+    setFeedbackMessage('已清空画布')
   }
 
   function handleUndo() {
@@ -111,6 +130,7 @@ function App() {
       parseSource: 'dev',
       createdAt: createTimestamp(),
     })
+    setFeedbackMessage('已撤销上一步')
   }
 
   return (
@@ -136,6 +156,9 @@ function App() {
           commandExamples={commandExamples}
           onPauseListening={speech.pauseListening}
           onResumeListening={speech.resumeListening}
+          feedbackMessage={feedbackMessage}
+          isFeedbackSpeaking={speechFeedback.isSpeaking}
+          isFeedbackVoiceSupported={speechFeedback.isSupported}
         />
 
         <section className="canvas-area" aria-label="Canvas board">

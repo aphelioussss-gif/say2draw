@@ -22,7 +22,7 @@ Say2Draw 的核心价值：**可控、可累积、可中断的语音绘图体验
 
 ## 当前进度
 
-当前处于 PR 8：修复语音反馈同步问题阶段。
+当前处于 PR 9：LLM 结构化指令解析器阶段。
 
 已完成：
 
@@ -37,10 +37,11 @@ Say2Draw 的核心价值：**可控、可累积、可中断的语音绘图体验
 - SpeechSynthesis 语音反馈
 - 系统播报期间忽略识别结果，避免回声触发
 - 修复语音反馈状态同步问题（PR 8）
+- LLM 结构化指令解析器（PR 9）
 
 暂未完成：
 
-- OpenAI-compatible LLM 兜底
+- batch_actions 与模糊指令澄清
 
 ## 核心特性
 
@@ -93,8 +94,26 @@ MVP 计划支持以下语音指令：
 - React + TypeScript
 - Vite
 - Web Speech API
-- OpenAI-compatible LLM provider（后续可接 DeepSeek / Mimo 等兼容接口）
+- OpenAI-compatible LLM provider（可选）
 - HTML5 Canvas
+
+## LLM 配置（可选）
+
+Say2Draw 的 LLM 功能是可选的。未配置 API key 时，系统仍可正常运行本地指令。
+
+如需启用 LLM fallback：
+
+1. 复制 `.env.example` 为 `.env`
+2. 填入你的 OpenAI API key
+3. 启动服务端：`npm run server`
+4. 启动前端：`npm run dev`
+
+```bash
+cp .env.example .env
+# 编辑 .env 填入 API key
+npm run server
+npm run dev
+```
 
 ## LLM 策略
 

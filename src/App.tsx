@@ -73,19 +73,20 @@ function App() {
   const speech = useSpeechRecognition({
     shouldIgnoreResult: () => speechFeedback.isSpeaking,
     onFinalTranscript: (transcript) => {
-      const action = routeCommand(transcript)
-      const message = getActionFeedback(action)
-
       speech.pauseListening()
-      dispatch(action)
-      setFeedbackMessage(message)
-      speechFeedback.speak(message, {
-        onEnd: () => {
-          // Use ref to get latest value in async callback
-          if (!speech.isManuallyPausedRef.current) {
-            speech.resumeListening()
-          }
-        },
+      setFeedbackMessage('思考中...')
+
+      routeCommand(transcript).then((action) => {
+        const message = getActionFeedback(action)
+        dispatch(action)
+        setFeedbackMessage(message)
+        speechFeedback.speak(message, {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) {
+              speech.resumeListening()
+            }
+          },
+        })
       })
     },
   })

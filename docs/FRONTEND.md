@@ -1,4 +1,4 @@
-# VoiceCanvas 前端设计规范
+# Say2Draw 前端设计规范
 
 ---
 
@@ -81,7 +81,7 @@ export const CANVAS_HEIGHT = 500;
 ## 4. StatusBar
 
 ```
-VoiceCanvas    [● 状态灯]  [状态文字]
+Say2Draw    [● 状态灯]  [状态文字]
 ```
 
 状态灯是 8px 圆点，Listening 时有 pulse 动效（纯 CSS，不用 JS）：

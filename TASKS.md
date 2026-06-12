@@ -62,8 +62,8 @@ MVP 判断标准：
 
 | PR    | Status | Branch                       | Title                                            | Key Commit | Completed At | Notes                                |
 | ----- | ------ | ---------------------------- | ------------------------------------------------ | ---------- | ------------ | ------------------------------------ |
-| PR 0  | Todo   | main                         | docs: add project planning documents             | -          | -            | PRD / PLAN / SYSTEM / AGENTS / TASKS |
-| PR 1  | Todo   | feat/app-scaffold            | feat: initialize app scaffold                    | -          | -            | 基础页面布局，不做业务功能                        |
+| PR 0  | Done   | main                         | chore: initialize project baseline               | b72e3c2    | 2026-06-12   | PRD / PLAN / SYSTEM / AGENTS / TASKS / Vite baseline |
+| PR 1  | Done   | app-scaffold                 | feat: initialize app scaffold                    | d835ab2    | 2026-06-12   | 基础页面布局，不做业务功能                        |
 | PR 2  | Todo   | feat/canvas-engine           | feat: add canvas drawing engine                  | -          | -            | Canvas 渲染基础图形                        |
 | PR 3  | Todo   | feat/drawing-reducer         | feat: add drawing reducer and history            | -          | -            | useReducer / undo / history          |
 | PR 4  | Todo   | feat/auto-speech-recognition | feat: add automatic speech recognition           | -          | -            | 自动持续监听，不是点击开始                        |
@@ -148,7 +148,7 @@ docs: add project planning documents
 Branch:
 
 ```text
-feat/app-scaffold
+app-scaffold
 ```
 
 Title:

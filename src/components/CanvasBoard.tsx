@@ -24,6 +24,15 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
     ctx.stroke()
   }
 
+  if (shape.type === 'ellipse') {
+    ctx.beginPath()
+    ctx.ellipse(shape.x, shape.y, shape.radiusX, shape.radiusY, 0, 0, Math.PI * 2)
+    if (shape.fill) {
+      ctx.fill()
+    }
+    ctx.stroke()
+  }
+
   if (shape.type === 'rect') {
     if (shape.fill) {
       ctx.fillRect(shape.x, shape.y, shape.width, shape.height)
@@ -36,6 +45,22 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
     ctx.moveTo(shape.x1, shape.y1)
     ctx.lineTo(shape.x2, shape.y2)
     ctx.stroke()
+  }
+
+  if (shape.type === 'polygon') {
+    const [firstPoint, ...restPoints] = shape.points
+    if (firstPoint) {
+      ctx.beginPath()
+      ctx.moveTo(firstPoint.x, firstPoint.y)
+      restPoints.forEach((point) => {
+        ctx.lineTo(point.x, point.y)
+      })
+      ctx.closePath()
+      if (shape.fill) {
+        ctx.fill()
+      }
+      ctx.stroke()
+    }
   }
 
   if (shape.type === 'text') {

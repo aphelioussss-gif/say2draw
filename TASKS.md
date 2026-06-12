@@ -74,6 +74,7 @@ MVP 判断标准：
 | PR 9  | Done   | feat/llm-parser              | feat: add llm structured command parser          | -          | 2026-06-12   | OpenAI-compatible LLM 兜底            |
 | PR 10 | In Progress | feat/batch-actions        | feat: support batch actions and clarification    | -          | -            | 复杂指令拆解与澄清                            |
 | PR 11 | Todo   | docs/finalize-submission     | docs: finalize readme design doc and demo script | -          | -            | README / DESIGN / Demo 视频            |
+| PR 14 | In Progress | feat/expressiveness-upgrade | feat: improve drawing expressiveness             | -          | -            | 新增 ellipse/polygon、prompt 构图增强、坐标 jitter |
 
 Status 可选值：
 

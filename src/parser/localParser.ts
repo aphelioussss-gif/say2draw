@@ -13,6 +13,8 @@ const COLOR_MAP = [
 
 export const LOCAL_PARSER_EXAMPLES: LocalParserExample[] = [
   { input: '画一个红色圆形', expectedActionType: 'add_shape' },
+  { input: '画一个绿色椭圆', expectedActionType: 'add_shape' },
+  { input: '画一个黄色三角形', expectedActionType: 'add_shape' },
   { input: '画一个蓝色矩形', expectedActionType: 'add_shape' },
   { input: '画一条黑色线', expectedActionType: 'add_shape' },
   { input: '写上你好', expectedActionType: 'add_shape' },
@@ -45,6 +47,20 @@ function createCircle(id: string, color: string): Shape {
   }
 }
 
+function createEllipse(id: string, color: string): Shape {
+  return {
+    id,
+    type: 'ellipse',
+    x: 400,
+    y: 250,
+    radiusX: 90,
+    radiusY: 52,
+    fill: color,
+    stroke: color,
+    lineWidth: 4,
+  }
+}
+
 function createRect(id: string, color: string): Shape {
   return {
     id,
@@ -53,6 +69,21 @@ function createRect(id: string, color: string): Shape {
     y: 190,
     width: 160,
     height: 120,
+    fill: color,
+    stroke: color,
+    lineWidth: 4,
+  }
+}
+
+function createTriangle(id: string, color: string): Shape {
+  return {
+    id,
+    type: 'polygon',
+    points: [
+      { x: 400, y: 150 },
+      { x: 520, y: 350 },
+      { x: 280, y: 350 },
+    ],
     fill: color,
     stroke: color,
     lineWidth: 4,
@@ -117,7 +148,7 @@ export function parseLocalCommand(
     }
   }
 
-  if (text.includes('圆形') || text.includes('圆')) {
+  if (text.includes('圆') && !text.includes('椭圆')) {
     return {
       ok: true,
       action: {
@@ -126,6 +157,32 @@ export function parseLocalCommand(
         parseSource: 'local',
         createdAt,
         shape: createCircle(createId(), color),
+      },
+    }
+  }
+
+  if (text.includes('椭圆')) {
+    return {
+      ok: true,
+      action: {
+        type: 'add_shape',
+        rawText,
+        parseSource: 'local',
+        createdAt,
+        shape: createEllipse(createId(), color),
+      },
+    }
+  }
+
+  if (text.includes('三角形') || text.includes('三角')) {
+    return {
+      ok: true,
+      action: {
+        type: 'add_shape',
+        rawText,
+        parseSource: 'local',
+        createdAt,
+        shape: createTriangle(createId(), color),
       },
     }
   }

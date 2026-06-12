@@ -6,12 +6,20 @@ export function getActionFeedback(action: DrawingAction): string {
       return '已为你画了一个圆形'
     }
 
+    if (action.shape.type === 'ellipse') {
+      return '已为你画了一个椭圆'
+    }
+
     if (action.shape.type === 'rect') {
       return '已为你画了一个矩形'
     }
 
     if (action.shape.type === 'line') {
       return '已为你画了一条线'
+    }
+
+    if (action.shape.type === 'polygon') {
+      return '已为你画了一个多边形'
     }
 
     return '已写上文字'

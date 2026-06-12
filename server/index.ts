@@ -38,13 +38,32 @@ function getOpenAIClient(): OpenAI | null {
 
 // Inline schema for the system prompt (json_object mode)
 const OUTPUT_SCHEMA_TEXT = `{
-  "type": "add_shape" | "clear_canvas" | "undo" | "ask_clarification",
-  "shape": {                          // only for add_shape
-    "type": "circle" | "rect" | "line" | "text",
+  "actions"?: [                       // preferred for scenes or objects decomposed into multiple shapes
+    {
+      "type": "add_shape" | "clear_canvas" | "undo" | "ask_clarification",
+      "shape"?: {                     // only for add_shape
+        "type": "circle" | "ellipse" | "rect" | "line" | "polygon" | "text",
+        "x"?: number, "y"?: number,
+        "radius"?: number,            // circle only
+        "radiusX"?: number, "radiusY"?: number, // ellipse only
+        "width"?: number, "height"?: number, // rect only
+        "x1"?: number, "y1"?: number, "x2"?: number, "y2"?: number, // line only
+        "points"?: [{ "x": number, "y": number }], // polygon only, 3-8 points
+        "text"?: string, "fontSize"?: number, // text only
+        "fill"?: string, "stroke"?: string, "lineWidth"?: number
+      },
+      "clarification"?: string        // only for ask_clarification
+    }
+  ],
+  "type"?: "add_shape" | "clear_canvas" | "undo" | "ask_clarification", // allowed for simple single action
+  "shape"?: {
+    "type": "circle" | "ellipse" | "rect" | "line" | "polygon" | "text",
     "x": number, "y": number,
     "radius"?: number,                // circle only
+    "radiusX"?: number, "radiusY"?: number, // ellipse only
     "width"?: number, "height"?: number, // rect only
     "x1"?: number, "y1"?: number, "x2"?: number, "y2"?: number, // line only
+    "points"?: [{ "x": number, "y": number }], // polygon only, 3-8 points
     "text"?: string, "fontSize"?: number, // text only
     "fill"?: string, "stroke"?: string, "lineWidth"?: number
   },
@@ -77,8 +96,23 @@ Rules:
 - Canvas size is 800x500 pixels.
 - For add_shape, always provide a "shape" object with at least "type".
 - Supported colors (hex): #ef4444 (red), #3b82f6 (blue), #22c55e (green), #eab308 (yellow), #111827 (black).
-- You can map common concepts to shapes: sun=circle, tree=rect+circle, house=rect+triangle, etc.
-- IMPORTANT: If the command mentions a real-world object that does NOT map to a clear circle/rect/line/text (like "牛奶", "汽车", "手机"), you MUST use "type": "ask_clarification" with a Chinese message asking what shape to use.
+- Use only these shape types: circle, ellipse, rect, line, polygon, text.
+- You can map common concepts to shapes: sun=circle+line rays, tree=rect+circle/ellipse, house=rect+polygon roof, face=circle+circle eyes+line/polygon mouth.
+- IMPORTANT: If the command mentions a real-world object that does NOT map to clear circle/ellipse/rect/line/polygon/text shapes (like "牛奶", "汽车", "手机"), you MUST use "type": "ask_clarification" with a Chinese message asking what shape to use.
+
+=== Object Decomposition ===
+When the user describes an object or scene, follow these rules:
+1. DECOMPOSE into 2-5 shapes from [circle, ellipse, rect, line, polygon, text].
+2. Main body FIRST (largest), details SECOND (smaller).
+3. Use POSITION to show relationship: eyes INSIDE face, roof ABOVE wall, rays AROUND center.
+4. Vary SIZES: main body bigger, details smaller.
+5. If you CANNOT decompose meaningfully, use ask_clarification.
+
+=== Composition ===
+- Do NOT place every object at canvas center (400, 250).
+- Use the full canvas: sun at upper-right, ground at bottom, trees at left.
+- Overlapping shapes can create depth.
+- Leave breathing room around objects.
 - Do NOT wrap the JSON in markdown code fences. Output raw JSON only.`
 
   try {
@@ -105,6 +139,9 @@ Rules:
 
     try {
       const parsed = JSON.parse(cleaned)
+      if (Array.isArray(parsed.actions)) {
+        return res.json({ ok: true, actions: parsed.actions })
+      }
       return res.json({ ok: true, action: parsed })
     } catch {
       return res.json({ ok: false, error: 'Invalid JSON response from LLM', raw: cleaned.slice(0, 200) })

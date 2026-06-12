@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export type LLMStatus = 'checking' | 'configured' | 'not_configured' | 'error'
+export type LLMStatus = 'checking' | 'configured' | 'not_configured' | 'server_offline' | 'error'
 
 type HealthResponse = {
   ok: boolean
@@ -33,7 +33,7 @@ export function useLLMStatus(): LLMStatus {
         setStatus(data.llmConfigured ? 'configured' : 'not_configured')
       } catch {
         if (!cancelled) {
-          setStatus('not_configured')
+          setStatus('server_offline')
         }
       }
     }

@@ -47,13 +47,15 @@ function getStatusDotClass(status: VoiceStatus) {
 const LLM_STATUS_LABEL: Record<LLMStatus, string> = {
   checking: 'LLM: 检测中...',
   configured: 'LLM: 已就绪',
-  not_configured: 'LLM: 未配置',
+  not_configured: 'LLM: 未配置 Key',
+  server_offline: 'LLM: 服务端未启动',
   error: 'LLM: 连接失败',
 }
 
 function getLLMStatusDotClass(status: LLMStatus) {
   if (status === 'configured') return 'listening'
   if (status === 'checking') return 'processing'
+  if (status === 'server_offline' || status === 'not_configured') return 'idle'
   return 'error'
 }
 
@@ -305,9 +307,11 @@ export function VoicePanel({
             ? '复杂指令将调用 AI 解析'
             : llmStatus === 'not_configured'
               ? '复制 .env.example 为 .env 并填入 Key，或在上方直接输入'
-              : llmStatus === 'checking'
-                ? '正在检测 AI 服务...'
-                : 'AI 服务不可用，本地指令不受影响'}
+              : llmStatus === 'server_offline'
+                ? '请在终端运行 npm run server 启动 AI 服务'
+                : llmStatus === 'checking'
+                  ? '正在检测 AI 服务...'
+                  : 'AI 服务不可用，本地指令不受影响'}
         </p>
       </section>
 

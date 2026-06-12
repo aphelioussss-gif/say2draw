@@ -22,7 +22,7 @@ Say2Draw 的核心价值：**可控、可累积、可中断的语音绘图体验
 
 ## 当前进度
 
-当前处于 PR 4：自动语音监听阶段。
+当前处于 PR 5：本地规则指令解析阶段。
 
 已完成：
 
@@ -31,12 +31,13 @@ Say2Draw 的核心价值：**可控、可累积、可中断的语音绘图体验
 - Canvas 真实绘图引擎
 - useReducer 绘图状态与历史记录
 - Web Speech API 自动语音监听
+- 中文本地规则 parser
 
 暂未完成：
 
-- 指令解析与 LLM 兜底
 - 语音指令驱动 Canvas 执行
 - 语音反馈与回声保护
+- OpenAI-compatible LLM 兜底
 
 ## 核心特性
 
@@ -89,8 +90,16 @@ MVP 计划支持以下语音指令：
 - React + TypeScript
 - Vite
 - Web Speech API
-- OpenAI API
+- OpenAI-compatible LLM provider（后续可接 DeepSeek / Mimo 等兼容接口）
 - HTML5 Canvas
+
+## LLM 策略
+
+MVP 优先使用本地规则 parser，基础指令不依赖任何模型 API。
+
+后续复杂指令解析会设计为 OpenAI-compatible LLM provider，而不是绑定单一 OpenAI 服务。只要 DeepSeek、Mimo 等服务提供兼容 OpenAI 的接口，就可以作为候选 provider。
+
+API key 不会放入前端代码；LLM 兜底会通过后端代理或 serverless API 接入。
 
 ## 项目结构
 

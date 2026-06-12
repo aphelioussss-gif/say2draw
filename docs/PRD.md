@@ -671,9 +671,9 @@ P1 是提升作品竞争力和面试表达空间的功能。
 
 当本地规则解析失败时，调用 LLM 进行结构化解析。
 
-LLM 供应商锁定为：
+LLM 供应商不锁定单一服务，要求兼容：
 
-OpenAI Structured Outputs
+OpenAI-compatible structured output API
 
 要求：
 
@@ -950,9 +950,9 @@ MVP 语音触发方案：
 
 ### 13.3 LLM
 
-LLM 供应商锁定为：
+LLM 供应商不锁定单一服务，要求兼容：
 
-OpenAI Structured Outputs
+OpenAI-compatible structured output API
 
 使用原则：
 

@@ -15,6 +15,14 @@ export type CircleShape = ShapeBase & {
   radius: number
 }
 
+export type EllipseShape = ShapeBase & {
+  type: 'ellipse'
+  x: number
+  y: number
+  radiusX: number
+  radiusY: number
+}
+
 export type RectShape = ShapeBase & {
   type: 'rect'
   x: number
@@ -31,6 +39,16 @@ export type LineShape = ShapeBase & {
   y2: number
 }
 
+export type PolygonPoint = {
+  x: number
+  y: number
+}
+
+export type PolygonShape = ShapeBase & {
+  type: 'polygon'
+  points: PolygonPoint[]
+}
+
 export type TextShape = ShapeBase & {
   type: 'text'
   x: number
@@ -40,4 +58,4 @@ export type TextShape = ShapeBase & {
   align?: CanvasTextAlign
 }
 
-export type Shape = CircleShape | RectShape | LineShape | TextShape
+export type Shape = CircleShape | EllipseShape | RectShape | LineShape | PolygonShape | TextShape

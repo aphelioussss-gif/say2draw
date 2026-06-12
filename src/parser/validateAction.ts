@@ -16,9 +16,20 @@ const MIN_FONT_SIZE = 12
 const MAX_FONT_SIZE = 72
 const MIN_LINE_WIDTH = 1
 const MAX_LINE_WIDTH = 20
+const MIN_POLYGON_POINTS = 3
+const MAX_POLYGON_POINTS = 8
+const JITTER_RANGE = 6
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
+}
+
+function jitter(value: number): number {
+  return value + (Math.random() - 0.5) * JITTER_RANGE
+}
+
+function clampCoordinate(value: number, min: number, max: number): number {
+  return clamp(jitter(value), min, max)
 }
 
 function isValidHexColor(color: string): boolean {
@@ -40,8 +51,8 @@ function validateShape(shape: unknown): Shape | null {
 
   switch (s.type) {
     case 'circle': {
-      const x = typeof s.x === 'number' ? clamp(s.x, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X) : 400
-      const y = typeof s.y === 'number' ? clamp(s.y, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y) : 250
+      const x = clampCoordinate(typeof s.x === 'number' ? s.x : 400, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X)
+      const y = clampCoordinate(typeof s.y === 'number' ? s.y : 250, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y)
       const radius = typeof s.radius === 'number' ? clamp(s.radius, MIN_RADIUS, MAX_RADIUS) : 60
       const fill = typeof s.fill === 'string' && isValidHexColor(s.fill) ? s.fill : '#111827'
       const stroke = typeof s.stroke === 'string' && isValidHexColor(s.stroke) ? s.stroke : '#111827'
@@ -59,9 +70,31 @@ function validateShape(shape: unknown): Shape | null {
       }
     }
 
+    case 'ellipse': {
+      const x = clampCoordinate(typeof s.x === 'number' ? s.x : 400, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X)
+      const y = clampCoordinate(typeof s.y === 'number' ? s.y : 250, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y)
+      const radiusX = typeof s.radiusX === 'number' ? clamp(s.radiusX, MIN_RADIUS, MAX_RADIUS) : 80
+      const radiusY = typeof s.radiusY === 'number' ? clamp(s.radiusY, MIN_RADIUS, MAX_RADIUS) : 45
+      const fill = typeof s.fill === 'string' && isValidHexColor(s.fill) ? s.fill : '#111827'
+      const stroke = typeof s.stroke === 'string' && isValidHexColor(s.stroke) ? s.stroke : '#111827'
+      const lineWidth = typeof s.lineWidth === 'number' ? clamp(s.lineWidth, MIN_LINE_WIDTH, MAX_LINE_WIDTH) : 4
+
+      return {
+        id,
+        type: 'ellipse',
+        x,
+        y,
+        radiusX,
+        radiusY,
+        fill,
+        stroke,
+        lineWidth,
+      }
+    }
+
     case 'rect': {
-      const x = typeof s.x === 'number' ? clamp(s.x, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X) : 320
-      const y = typeof s.y === 'number' ? clamp(s.y, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y) : 190
+      const x = clampCoordinate(typeof s.x === 'number' ? s.x : 320, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X)
+      const y = clampCoordinate(typeof s.y === 'number' ? s.y : 190, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y)
       const width = typeof s.width === 'number' ? clamp(s.width, MIN_SIZE, MAX_SIZE) : 160
       const height = typeof s.height === 'number' ? clamp(s.height, MIN_SIZE, MAX_SIZE) : 120
       const fill = typeof s.fill === 'string' && isValidHexColor(s.fill) ? s.fill : '#111827'
@@ -82,10 +115,10 @@ function validateShape(shape: unknown): Shape | null {
     }
 
     case 'line': {
-      const x1 = typeof s.x1 === 'number' ? clamp(s.x1, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X) : 240
-      const y1 = typeof s.y1 === 'number' ? clamp(s.y1, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y) : 250
-      const x2 = typeof s.x2 === 'number' ? clamp(s.x2, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X) : 560
-      const y2 = typeof s.y2 === 'number' ? clamp(s.y2, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y) : 250
+      const x1 = clampCoordinate(typeof s.x1 === 'number' ? s.x1 : 240, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X)
+      const y1 = clampCoordinate(typeof s.y1 === 'number' ? s.y1 : 250, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y)
+      const x2 = clampCoordinate(typeof s.x2 === 'number' ? s.x2 : 560, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X)
+      const y2 = clampCoordinate(typeof s.y2 === 'number' ? s.y2 : 250, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y)
       const stroke = typeof s.stroke === 'string' && isValidHexColor(s.stroke) ? s.stroke : '#111827'
       const lineWidth = typeof s.lineWidth === 'number' ? clamp(s.lineWidth, MIN_LINE_WIDTH, MAX_LINE_WIDTH) : 6
 
@@ -101,9 +134,51 @@ function validateShape(shape: unknown): Shape | null {
       }
     }
 
+    case 'polygon': {
+      if (!Array.isArray(s.points)) {
+        return null
+      }
+
+      const points = s.points
+        .slice(0, MAX_POLYGON_POINTS)
+        .map((point) => {
+          if (!point || typeof point !== 'object') {
+            return null
+          }
+
+          const p = point as Record<string, unknown>
+          if (typeof p.x !== 'number' || typeof p.y !== 'number') {
+            return null
+          }
+
+          return {
+            x: clampCoordinate(p.x, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X),
+            y: clampCoordinate(p.y, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y),
+          }
+        })
+        .filter((point): point is { x: number; y: number } => point !== null)
+
+      if (points.length < MIN_POLYGON_POINTS) {
+        return null
+      }
+
+      const fill = typeof s.fill === 'string' && isValidHexColor(s.fill) ? s.fill : '#111827'
+      const stroke = typeof s.stroke === 'string' && isValidHexColor(s.stroke) ? s.stroke : '#111827'
+      const lineWidth = typeof s.lineWidth === 'number' ? clamp(s.lineWidth, MIN_LINE_WIDTH, MAX_LINE_WIDTH) : 4
+
+      return {
+        id,
+        type: 'polygon',
+        points,
+        fill,
+        stroke,
+        lineWidth,
+      }
+    }
+
     case 'text': {
-      const x = typeof s.x === 'number' ? clamp(s.x, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X) : 400
-      const y = typeof s.y === 'number' ? clamp(s.y, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y) : 250
+      const x = clampCoordinate(typeof s.x === 'number' ? s.x : 400, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_X)
+      const y = clampCoordinate(typeof s.y === 'number' ? s.y : 250, MIN_SHAPE_VALUE, MAX_SHAPE_VALUE_Y)
       const text = typeof s.text === 'string' ? s.text.slice(0, MAX_TEXT_LENGTH) : ''
       const fontSize = typeof s.fontSize === 'number' ? clamp(s.fontSize, MIN_FONT_SIZE, MAX_FONT_SIZE) : 36
       const fill = typeof s.fill === 'string' && isValidHexColor(s.fill) ? s.fill : '#111827'

@@ -24,11 +24,11 @@ export async function routeCommand(
     }
   }
 
-  // Fallback to ask_clarification
+  // Fallback to ask_clarification (LLM either not enabled or failed)
   return {
     type: 'parse_error',
     rawText: result.rawText,
-    parseSource: 'llm',
+    parseSource: 'local',
     createdAt: result.createdAt,
     message: '我不太确定你的意思，能再说详细一点吗？',
   }

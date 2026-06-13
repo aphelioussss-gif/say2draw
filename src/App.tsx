@@ -359,7 +359,8 @@ function App() {
         }
       }
 
-      // Fallback to geometric sketch
+      // Log failure details for debugging
+      console.warn('[Sketch] Generation failed:', { rawText, zone, ok: data.ok, hasSketch: !!data.sketch, error: data.error })
       setFeedbackMessage('草图生成失败，请重试')
       speechFeedback.speak('草图生成失败，请重试', {
         onEnd: () => {
@@ -424,6 +425,7 @@ function App() {
         }
       }
 
+      console.warn('[SketchEdit] Edit failed:', { instruction, accumulate, ok: data.ok, hasSketch: !!data.sketch, error: data.error })
       setFeedbackMessage('调整失败，请重试')
       speechFeedback.speak('调整失败，请重试', {
         onEnd: () => {

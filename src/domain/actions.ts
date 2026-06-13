@@ -62,10 +62,3 @@ export type CommandRecord = {
   message: string
   createdAt: string
 }
-
-export type ActiveSketch = {
-  objectName: string
-  shapeIds: string[]
-  initialShapes: import('./shapes').Shape[]
-  round: number
-}

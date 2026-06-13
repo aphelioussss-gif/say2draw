@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import type { VoiceStatus } from '../hooks/useSpeechRecognition'
 import type { LLMStatus } from '../hooks/useLLMStatus'
-import type { ActiveSketch } from '../domain/actions'
 import { FeedbackPanel } from './FeedbackPanel'
 
 type VoicePanelProps = {
@@ -17,7 +16,6 @@ type VoicePanelProps = {
   isFeedbackSpeaking: boolean
   isFeedbackVoiceSupported: boolean
   llmStatus: LLMStatus
-  activeSketch: ActiveSketch | null
   isGeneratingSketch?: boolean
 }
 
@@ -75,7 +73,6 @@ export function VoicePanel({
   isFeedbackSpeaking,
   isFeedbackVoiceSupported,
   llmStatus,
-  activeSketch,
 }: VoicePanelProps) {
   const isPaused = status === 'paused'
   const canControlListening = isSupported && status !== 'unsupported'
@@ -316,25 +313,6 @@ export function VoicePanel({
                   ? '正在检测 AI 服务...'
                   : 'AI 服务不可用，本地指令不受影响'}
         </p>
-      </section>
-
-      <section className="voice-card sketch-card" aria-label="Sketch refinement status">
-        <p className="label">草图打磨</p>
-        {activeSketch ? (
-          <div>
-            <p className="content" style={{ marginBottom: 4 }}>
-              当前对象：{activeSketch.objectName}
-            </p>
-            <p className="content" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-              第 {activeSketch.round} 轮打磨
-            </p>
-            <p className="feedback-meta" style={{ fontSize: 11 }}>
-              可说：长一点 · 大一点 · 往右移 · 颜色改成白色 · 重来 · 就这样
-            </p>
-          </div>
-        ) : (
-          <p className="content placeholder">未进入草图打磨</p>
-        )}
       </section>
 
       <section className="demo-prompts" aria-label="Demo command examples">

@@ -1,4 +1,5 @@
 import type { Shape } from '../domain/shapes'
+import { CANVAS_ZONES, type CanvasZone } from '../domain/shapes'
 import type { LocalParserExample, LocalParserOptions, ParseResult } from './parserTypes'
 
 const DEFAULT_COLOR = '#111827'
@@ -34,12 +35,34 @@ function createDefaultId() {
   return `shape-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function createCircle(id: string, color: string): Shape {
+/**
+ * Extract spatial zone hint from voice input.
+ * Recognizes: 左边/右边/上面/下面/中间/左上角/右上角/左下角/右下角
+ * Returns null if no spatial hint detected.
+ */
+export function extractSpatialZone(rawText: string): CanvasZone | null {
+  const t = rawText.replace(/\s+/g, '')
+  if (/左上角|左上/.test(t)) return 'topLeft'
+  if (/右上角|右上/.test(t)) return 'topRight'
+  if (/左下角|左下/.test(t)) return 'bottomLeft'
+  if (/右下角|右下/.test(t)) return 'bottomRight'
+  if (/左边|左侧|左面/.test(t)) return 'left'
+  if (/右边|右侧|右面/.test(t)) return 'right'
+  if (/上面|上方|上边|顶部/.test(t)) return 'top'
+  if (/下面|下方|下边|底部/.test(t)) return 'bottom'
+  if (/中间|中央|中心/.test(t)) return 'center'
+  return null
+}
+
+// ---- Shape factories (zone-aware) ----
+
+function createCircle(id: string, color: string, zone?: CanvasZone): Shape {
+  const pos = zone ? CANVAS_ZONES[zone] : CANVAS_ZONES.center
   return {
     id,
     type: 'circle',
-    x: 400,
-    y: 250,
+    x: pos.cx,
+    y: pos.cy,
     radius: 60,
     fill: color,
     stroke: color,
@@ -47,12 +70,13 @@ function createCircle(id: string, color: string): Shape {
   }
 }
 
-function createEllipse(id: string, color: string): Shape {
+function createEllipse(id: string, color: string, zone?: CanvasZone): Shape {
+  const pos = zone ? CANVAS_ZONES[zone] : CANVAS_ZONES.center
   return {
     id,
     type: 'ellipse',
-    x: 400,
-    y: 250,
+    x: pos.cx,
+    y: pos.cy,
     radiusX: 90,
     radiusY: 52,
     fill: color,
@@ -61,12 +85,13 @@ function createEllipse(id: string, color: string): Shape {
   }
 }
 
-function createRect(id: string, color: string): Shape {
+function createRect(id: string, color: string, zone?: CanvasZone): Shape {
+  const pos = zone ? CANVAS_ZONES[zone] : CANVAS_ZONES.center
   return {
     id,
     type: 'rect',
-    x: 320,
-    y: 190,
+    x: pos.cx - 80,
+    y: pos.cy - 60,
     width: 160,
     height: 120,
     fill: color,
@@ -75,14 +100,15 @@ function createRect(id: string, color: string): Shape {
   }
 }
 
-function createTriangle(id: string, color: string): Shape {
+function createTriangle(id: string, color: string, zone?: CanvasZone): Shape {
+  const pos = zone ? CANVAS_ZONES[zone] : CANVAS_ZONES.center
   return {
     id,
     type: 'polygon',
     points: [
-      { x: 400, y: 150 },
-      { x: 520, y: 350 },
-      { x: 280, y: 350 },
+      { x: pos.cx, y: pos.cy - 100 },
+      { x: pos.cx + 120, y: pos.cy + 100 },
+      { x: pos.cx - 120, y: pos.cy + 100 },
     ],
     fill: color,
     stroke: color,
@@ -90,25 +116,27 @@ function createTriangle(id: string, color: string): Shape {
   }
 }
 
-function createLine(id: string, color: string): Shape {
+function createLine(id: string, color: string, zone?: CanvasZone): Shape {
+  const pos = zone ? CANVAS_ZONES[zone] : CANVAS_ZONES.center
   return {
     id,
     type: 'line',
-    x1: 240,
-    y1: 250,
-    x2: 560,
-    y2: 250,
+    x1: pos.cx - 160,
+    y1: pos.cy,
+    x2: pos.cx + 160,
+    y2: pos.cy,
     stroke: color,
     lineWidth: 6,
   }
 }
 
-function createTextShape(id: string, text: string, color: string): Shape {
+function createTextShape(id: string, text: string, color: string, zone?: CanvasZone): Shape {
+  const pos = zone ? CANVAS_ZONES[zone] : CANVAS_ZONES.center
   return {
     id,
     type: 'text',
-    x: 400,
-    y: 250,
+    x: pos.cx,
+    y: pos.cy,
     text,
     fill: color,
     fontSize: 36,
@@ -123,6 +151,7 @@ export function parseLocalCommand(
   const createdAt = options.createdAt ?? new Date().toISOString()
   const createId = options.createId ?? createDefaultId
   const color = resolveColor(text)
+  const zone = extractSpatialZone(rawText)
 
   if (text.includes('清空画布') || text.includes('清除画布')) {
     return {
@@ -156,7 +185,8 @@ export function parseLocalCommand(
         rawText,
         parseSource: 'local',
         createdAt,
-        shape: createCircle(createId(), color),
+        shape: createCircle(createId(), color, zone ?? undefined),
+        zone,
       },
     }
   }
@@ -169,7 +199,8 @@ export function parseLocalCommand(
         rawText,
         parseSource: 'local',
         createdAt,
-        shape: createEllipse(createId(), color),
+        shape: createEllipse(createId(), color, zone ?? undefined),
+        zone,
       },
     }
   }
@@ -182,7 +213,8 @@ export function parseLocalCommand(
         rawText,
         parseSource: 'local',
         createdAt,
-        shape: createTriangle(createId(), color),
+        shape: createTriangle(createId(), color, zone ?? undefined),
+        zone,
       },
     }
   }
@@ -195,7 +227,8 @@ export function parseLocalCommand(
         rawText,
         parseSource: 'local',
         createdAt,
-        shape: createRect(createId(), color),
+        shape: createRect(createId(), color, zone ?? undefined),
+        zone,
       },
     }
   }
@@ -208,7 +241,8 @@ export function parseLocalCommand(
         rawText,
         parseSource: 'local',
         createdAt,
-        shape: createLine(createId(), color),
+        shape: createLine(createId(), color, zone ?? undefined),
+        zone,
       },
     }
   }
@@ -224,7 +258,8 @@ export function parseLocalCommand(
           rawText,
           parseSource: 'local',
           createdAt,
-          shape: createTextShape(createId(), content, color),
+          shape: createTextShape(createId(), content, color, zone ?? undefined),
+          zone,
         },
       }
     }

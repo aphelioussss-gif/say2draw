@@ -9,13 +9,14 @@ import {
   drawingReducer,
   initialDrawingState,
 } from './domain/reducer'
-import { CANVAS_HEIGHT, CANVAS_WIDTH, type Shape } from './domain/shapes'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, CANVAS_ZONES, type Shape } from './domain/shapes'
 import type { DrawingAction, ActiveSketch, ShapePatch } from './domain/actions'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
 import { useLLMStatus } from './hooks/useLLMStatus'
 import { routeCommands } from './parser/commandRouter'
 import { isDrawingIntent } from './parser/sketchIntent'
+import { extractSpatialZone } from './parser/localParser'
 import { parseSketchXML } from './sketch/sketchParser'
 import { fitBezierCurve } from './sketch/bezierFitter'
 import { gridToPixel } from './sketch/svgRenderer'
@@ -195,6 +196,118 @@ function App() {
     return new Date().toISOString()
   }
 
+  // ---- Bounding box helpers (A2: overlap avoidance) ----
+
+  interface BBox { minX: number; minY: number; maxX: number; maxY: number }
+
+  function shapeBBox(shape: Shape): BBox {
+    switch (shape.type) {
+      case 'circle':
+        return { minX: shape.x - shape.radius, minY: shape.y - shape.radius, maxX: shape.x + shape.radius, maxY: shape.y + shape.radius }
+      case 'ellipse':
+        return { minX: shape.x - shape.radiusX, minY: shape.y - shape.radiusY, maxX: shape.x + shape.radiusX, maxY: shape.y + shape.radiusY }
+      case 'rect':
+        return { minX: shape.x, minY: shape.y, maxX: shape.x + shape.width, maxY: shape.y + shape.height }
+      case 'line':
+        return { minX: Math.min(shape.x1, shape.x2), minY: Math.min(shape.y1, shape.y2), maxX: Math.max(shape.x1, shape.x2), maxY: Math.max(shape.y1, shape.y2) }
+      case 'text': {
+        const estimatedW = (shape.text?.length ?? 2) * (shape.fontSize ?? 32) * 0.6
+        const estimatedH = (shape.fontSize ?? 32) * 1.2
+        return { minX: shape.x - estimatedW / 2, minY: shape.y - estimatedH / 2, maxX: shape.x + estimatedW / 2, maxY: shape.y + estimatedH / 2 }
+      }
+      case 'polyline':
+      case 'polygon': {
+        const xs = shape.points.map((p) => p.x)
+        const ys = shape.points.map((p) => p.y)
+        return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) }
+      }
+      case 'arc':
+        return { minX: shape.x - shape.radius, minY: shape.y - shape.radius, maxX: shape.x + shape.radius, maxY: shape.y + shape.radius }
+      default:
+        return { minX: 0, minY: 0, maxX: 0, maxY: 0 }
+    }
+  }
+
+  function boxesOverlap(a: BBox, b: BBox): boolean {
+    return a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY
+  }
+
+  function shapeCenter(shape: Shape): { cx: number; cy: number } {
+    const bb = shapeBBox(shape)
+    return { cx: (bb.minX + bb.maxX) / 2, cy: (bb.minY + bb.maxY) / 2 }
+  }
+
+  /** Try up to 5 offset attempts to avoid overlap. Returns adjusted shape or original. */
+  function avoidOverlap(shape: Shape, existing: Shape[]): Shape {
+    if (existing.length === 0) return shape
+    const bb = shapeBBox(shape)
+    const overlaps = existing.some((s) => boxesOverlap(bb, shapeBBox(s)))
+    if (!overlaps) return shape
+
+    const offsets = [
+      { dx: 90, dy: 0 }, { dx: -90, dy: 0 }, { dx: 0, dy: 80 }, { dx: 0, dy: -80 }, { dx: 50, dy: 50 },
+    ]
+    for (const { dx, dy } of offsets) {
+      const candidate = shiftShapePixels(shape, dx, dy)
+      const cbb = shapeBBox(candidate)
+      if (!existing.some((s) => boxesOverlap(cbb, shapeBBox(s)))) {
+        return candidate
+      }
+    }
+    return shape // give up, accept overlap
+  }
+
+  function shiftShapePixels(shape: Shape, dx: number, dy: number): Shape {
+    const s = { ...shape }
+    if ('x' in s && typeof s.x === 'number') (s as Record<string, unknown>).x = s.x + dx
+    if ('y' in s && typeof s.y === 'number') (s as Record<string, unknown>).y = s.y + dy
+    if ('x1' in s && typeof s.x1 === 'number') (s as Record<string, unknown>).x1 = s.x1 + dx
+    if ('x2' in s && typeof s.x2 === 'number') (s as Record<string, unknown>).x2 = s.x2 + dx
+    if ('y1' in s && typeof s.y1 === 'number') (s as Record<string, unknown>).y1 = s.y1 + dy
+    if ('y2' in s && typeof s.y2 === 'number') (s as Record<string, unknown>).y2 = s.y2 + dy
+    if ('points' in s && Array.isArray(s.points)) {
+      (s as Record<string, unknown>).points = s.points.map((p: { x: number; y: number }) => ({ x: p.x + dx, y: p.y + dy }))
+    }
+    return s
+  }
+
+  // ---- Multi-object distribution (A4) ----
+
+  const ZONE_DIST_ORDER: Array<keyof typeof CANVAS_ZONES> = [
+    'center', 'top', 'left', 'right', 'bottom', 'topLeft', 'topRight', 'bottomLeft', 'bottomRight',
+  ]
+
+  /** Check if shapes are all close to default center — meaning they need distribution. */
+  function shapesNeedDistribution(shapes: Shape[]): boolean {
+    if (shapes.length <= 1) return false
+    // If more than 2 shapes with same-ish center → distribute
+    const centers = shapes.map(shapeCenter)
+    const allNearCenter = centers.every((c) => Math.abs(c.cx - 400) < 20 && Math.abs(c.cy - 250) < 20)
+    if (allNearCenter) return true
+    // If any two shapes overlap → distribute
+    for (let i = 0; i < shapes.length; i++) {
+      for (let j = i + 1; j < shapes.length; j++) {
+        if (boxesOverlap(shapeBBox(shapes[i]), shapeBBox(shapes[j]))) return true
+      }
+    }
+    return false
+  }
+
+  /** Distribute shapes across zones, avoiding overlap with existing shapes. */
+  function distributeShapes(shapes: Shape[], existing: Shape[]): Shape[] {
+    return shapes.map((shape, i) => {
+      const zoneKey = ZONE_DIST_ORDER[i % ZONE_DIST_ORDER.length]
+      const zone = CANVAS_ZONES[zoneKey]
+      const centered = shiftShapeToZone(shape, zone.cx, zone.cy)
+      return avoidOverlap(centered, [...existing, ...shapes.slice(0, i)])
+    })
+  }
+
+  function shiftShapeToZone(shape: Shape, cx: number, cy: number): Shape {
+    const center = shapeCenter(shape)
+    return shiftShapePixels(shape, cx - center.cx, cy - center.cy)
+  }
+
   function extractObjectName(rawText: string): string | null {
     const m = rawText.match(/(?:画|绘制|加|添加)(?:一个|一只|一棵|一座|一条|一朵|一片|个|只|棵|座|条|朵|片)?(.+?)(?:[，。,.！!？?]|$)/)
     if (!m || !m[1]) return null
@@ -217,10 +330,11 @@ function App() {
     })
 
     try {
+      const zone = extractSpatialZone(rawText)
       const res = await fetch('/api/sketch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText }),
+        body: JSON.stringify({ text: rawText, zone }),
       })
       const data = await res.json()
 
@@ -289,6 +403,7 @@ function App() {
     const screenshot = captureCanvas(canvasRef.current)
 
     try {
+      const zone = extractSpatialZone(instruction)
       const res = await fetch('/api/sketch-edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -296,6 +411,7 @@ function App() {
           instruction,
           currentImage: screenshot,
           previousConcept: sketchMode.concept,
+          zone,
         }),
       })
       const data = await res.json()
@@ -595,9 +711,44 @@ function App() {
           return
         }
 
-        actions.forEach((action) => {
-          applyActionWithDualLayer(action)
-        })
+        // A4: Conditional multi-object distribution
+        const addShapes = actions.filter((a) => a.type === 'add_shape' && a.shape)
+        if (addShapes.length > 1) {
+          const rawShapes = addShapes.map((a) => (a as DrawingAction & { shape: Shape }).shape)
+          if (shapesNeedDistribution(rawShapes)) {
+            const distributed = distributeShapes(rawShapes, state.shapes)
+            let di = 0
+            actions.forEach((action) => {
+              if (action.type === 'add_shape' && action.shape && di < distributed.length) {
+                const adjusted = { ...action, shape: distributed[di] }
+                dispatch(adjusted)
+                di++
+              } else if (!applyActionWithDualLayer(action)) {
+                dispatch(action)
+              }
+            })
+          } else {
+            actions.forEach((action) => {
+              if (!applyActionWithDualLayer(action)) {
+                if (action.type === 'add_shape' && action.shape) {
+                  dispatch({ ...action, shape: avoidOverlap(action.shape, state.shapes) })
+                } else {
+                  dispatch(action)
+                }
+              }
+            })
+          }
+        } else {
+          actions.forEach((action) => {
+            if (!applyActionWithDualLayer(action)) {
+              if (action.type === 'add_shape' && action.shape) {
+                dispatch({ ...action, shape: avoidOverlap(action.shape, state.shapes) })
+              } else {
+                dispatch(action)
+              }
+            }
+          })
+        }
         const message = getBatchFeedback(actions, rawText)
         setFeedbackMessage(message)
         speechFeedback.speak(message, {
@@ -622,7 +773,13 @@ function App() {
         }
 
         const message = getActionFeedback(action)
-        dispatch(action)
+        // A2: Avoid overlap for add_shape from non-dev sources
+        if (action.type === 'add_shape' && action.shape && action.parseSource !== 'dev') {
+          const adjusted: DrawingAction = { ...action, shape: avoidOverlap(action.shape, state.shapes) }
+          dispatch(adjusted)
+        } else {
+          dispatch(action)
+        }
         setFeedbackMessage(message)
         speechFeedback.speak(message, {
           onEnd: () => {

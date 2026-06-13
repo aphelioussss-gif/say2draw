@@ -31,6 +31,7 @@ export type DrawingAction =
   | (CommandMeta & {
       type: 'add_shape'
       shape: Shape
+      zone?: string | null
     })
   | (CommandMeta & {
       type: 'clear_canvas'

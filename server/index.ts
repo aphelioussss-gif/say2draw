@@ -93,6 +93,12 @@ t_values = [0.00]
 - Long strokes should be split into multiple shorter segments
 
 === Composition ===
+- 9 canvas zones (grid coords x/y = 1→50):
+  center (x20-30,y20-30)  top (x20-30,y32-42)  bottom (x20-30,y8-18)
+  left (x6-16,y20-30)  right (x34-44,y20-30)
+  topLeft (x6-16,y32-42)  topRight (x34-44,y32-42)
+  bottomLeft (x6-16,y8-18)  bottomRight (x34-44,y8-18)
+- Place the main object in the zone requested by the user. Default to center if no zone specified.
 - For one requested object, keep the whole object inside x8..x42 and y8..y42.
 - Center the main object near x25y25. Do not let ears, whiskers, tails, rays, or limbs touch the canvas edge.
 - Use compact proportions: one main body/head, then small attached details.
@@ -221,8 +227,11 @@ const SKETCH_CAT_EXAMPLE = `<example>
 </strokes>
 </example>`
 
-function buildSketchUserPrompt(concept: string): string {
-  return `You need to produce a hand-drawn sketch of: ${concept}
+function buildSketchUserPrompt(concept: string, zone?: string | null): string {
+  const zoneHint = zone
+    ? `\n\nSpatial placement hint: the user wants this sketch placed in the "${zone}" zone of the canvas. Use grid coordinates appropriate for this zone.`
+    : ''
+  return `You need to produce a hand-drawn sketch of: ${concept}${zoneHint}
 
 Here are examples of clean, bounded sketches using the format:
 
@@ -281,7 +290,7 @@ IMPORTANT: Output the COMPLETE set of strokes for the edited sketch — both the
  * Generate a hand-drawn sketch from text description via MiMo.
  */
 app.post('/api/sketch', async (req, res) => {
-  const { text } = req.body
+  const { text, zone } = req.body
 
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing text parameter' })
@@ -297,7 +306,7 @@ app.post('/api/sketch', async (req, res) => {
       model: getActiveModel(),
       messages: [
         { role: 'system', content: SKETCH_SYSTEM_PROMPT },
-        { role: 'user', content: buildSketchUserPrompt(text) },
+        { role: 'user', content: buildSketchUserPrompt(text, typeof zone === 'string' ? zone : null) },
       ],
       temperature: 0.3,
       max_tokens: 4000,
@@ -412,7 +421,7 @@ app.post('/api/parse-command', async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: `You are a drawing command parser. Convert natural language Chinese commands into JSON.\n\nSchema:\n${schema}\n\nRules: Canvas 800x500. Colors: #ef4444 red, #3b82f6 blue, #22c55e green, #eab308 yellow, #111827 black, #f9fafb white. Do NOT wrap in markdown. Output raw JSON.`,
+          content: `You are a drawing command parser. Convert natural language Chinese commands into JSON.\n\nSchema:\n${schema}\n\n=== Spatial Reference (50×50 Grid) ===\nThe canvas is 800×500 pixels. Think of it as a 50×50 grid for spatial reasoning:\n- x: 1→50 maps to 0→800 pixels (left→right)\n- y: 1→50 maps to 0→500 pixels (bottom→top)\n\n9 spatial zones with approximate pixel centers:\n  center:       (400, 250)   top:       (400, 380)   bottom:    (400, 120)\n  left:         (150, 250)   right:     (650, 250)\n  topLeft:      (150, 380)   topRight:  (650, 380)\n  bottomLeft:   (150, 120)   bottomRight:(650, 120)\n\nUse the grid for spatial reasoning, but return final shape coordinates in pixels.\nWhen the user mentions a spatial location (左边/右边/上面/下面/左上角/右上角/左下角/右下角/中间),\nplace the shape in the corresponding zone. For multiple objects, distribute across different zones.\n\nColors: #ef4444 red, #3b82f6 blue, #22c55e green, #eab308 yellow, #111827 black, #f9fafb white.\nDo NOT wrap in markdown. Output raw JSON.`,
         },
         { role: 'user', content: text },
       ],

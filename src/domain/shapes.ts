@@ -1,6 +1,21 @@
 export const CANVAS_WIDTH = 800
 export const CANVAS_HEIGHT = 500
 
+/** 9-zone spatial layout. Each zone provides a default center point in pixels. */
+export const CANVAS_ZONES: Record<string, { cx: number; cy: number }> = {
+  center:       { cx: 400, cy: 250 },
+  top:          { cx: 400, cy: 380 },
+  bottom:       { cx: 400, cy: 120 },
+  left:         { cx: 150, cy: 250 },
+  right:        { cx: 650, cy: 250 },
+  topLeft:      { cx: 150, cy: 380 },
+  topRight:     { cx: 650, cy: 380 },
+  bottomLeft:   { cx: 150, cy: 120 },
+  bottomRight:  { cx: 650, cy: 120 },
+}
+
+export type CanvasZone = keyof typeof CANVAS_ZONES
+
 type ShapeBase = {
   id: string
   stroke?: string

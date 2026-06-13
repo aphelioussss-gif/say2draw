@@ -31,6 +31,7 @@ export type DrawingAction =
   | (CommandMeta & {
       type: 'add_shape'
       shape: Shape
+      zone?: string | null
     })
   | (CommandMeta & {
       type: 'clear_canvas'
@@ -60,11 +61,4 @@ export type CommandRecord = {
   status: CommandStatus
   message: string
   createdAt: string
-}
-
-export type ActiveSketch = {
-  objectName: string
-  shapeIds: string[]
-  initialShapes: import('./shapes').Shape[]
-  round: number
 }

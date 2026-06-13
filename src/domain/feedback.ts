@@ -76,24 +76,3 @@ export function getBatchFeedback(actions: DrawingAction[], rawText: string): str
 
   return getActionFeedback(actions[0])
 }
-
-export function getSketchEnterFeedback(objectName: string): string {
-  return `我先画了一个大概的${objectName}，你可以说长一点、往右移、改颜色或就这样。`
-}
-
-export function getSketchModifierFeedback(rawText: string): string | null {
-  const t = rawText.trim()
-  if (/长一点|长一些|加长/.test(t)) return '好的，拉长了一点'
-  if (/短一点|短一些|缩短/.test(t)) return '好的，缩短了一点'
-  if (/大一点|大一些|放大/.test(t)) return '好的，放大了一点'
-  if (/小一点|小一些|缩小/.test(t)) return '好的，缩小了一点'
-  if (/往左/.test(t)) return '好的，往左移了'
-  if (/往右/.test(t)) return '好的，往右移了'
-  if (/往上/.test(t)) return '好的，往上移了'
-  if (/往下/.test(t)) return '好的，往下移了'
-  if (/颜色改/.test(t)) return '好的，颜色已更新'
-  if (/重来/.test(t)) return '好的，恢复到初始草图'
-  if (/就这样|可以了|好了/.test(t)) return '好的，草图已锁定'
-  if (/算了|不画了/.test(t)) return '好的，已保留当前草图'
-  return null
-}

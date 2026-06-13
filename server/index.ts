@@ -93,6 +93,12 @@ t_values = [0.00]
 - Long strokes should be split into multiple shorter segments
 
 === Composition ===
+- 9 canvas zones (grid coords x/y = 1→50):
+  center (x20-30,y20-30)  top (x20-30,y32-42)  bottom (x20-30,y8-18)
+  left (x6-16,y20-30)  right (x34-44,y20-30)
+  topLeft (x6-16,y32-42)  topRight (x34-44,y32-42)
+  bottomLeft (x6-16,y8-18)  bottomRight (x34-44,y8-18)
+- Place the main object in the zone requested by the user. Default to center if no zone specified.
 - For one requested object, keep the whole object inside x8..x42 and y8..y42.
 - Center the main object near x25y25. Do not let ears, whiskers, tails, rays, or limbs touch the canvas edge.
 - Use compact proportions: one main body/head, then small attached details.
@@ -221,8 +227,22 @@ const SKETCH_CAT_EXAMPLE = `<example>
 </strokes>
 </example>`
 
-function buildSketchUserPrompt(concept: string): string {
-  return `You need to produce a hand-drawn sketch of: ${concept}
+function buildSketchUserPrompt(concept: string, zone?: string | null): string {
+  const zoneGrid: Record<string, string> = {
+    center:       '画布中央 (x20-30, y20-30)',
+    top:          '画布上方 (x20-30, y32-42)',
+    bottom:       '画布下方 (x20-30, y8-18)',
+    left:         '画布左边 (x6-16, y20-30)',
+    right:        '画布右边 (x34-44, y20-30)',
+    topLeft:      '画布左上角 (x6-16, y32-42)',
+    topRight:     '画布右上角 (x34-44, y32-42)',
+    bottomLeft:   '画布左下角 (x6-16, y8-18)',
+    bottomRight:  '画布右下角 (x34-44, y8-18)',
+  }
+  const zoneHint = zone && zoneGrid[zone]
+    ? `\n\n位置要求：请将主体放置在${zoneGrid[zone]}范围内。`
+    : ''
+  return `You need to produce a hand-drawn sketch of: ${concept}${zoneHint}
 
 Here are examples of clean, bounded sketches using the format:
 
@@ -272,6 +292,36 @@ Output ONLY in XML format. NO markdown code fences.
 
 IMPORTANT: Output the COMPLETE set of strokes for the edited sketch — both the kept strokes and the modified/added ones. This replaces the previous sketch entirely.`
 
+const SKETCH_EDIT_ADD_PROMPT = `You are an expert sketch artist adding new elements to an existing hand-drawn sketch.
+
+You work on the same numbered grid (1 to ${GRID_RES} on x and y axes, coordinates like 'x1y1').
+
+You receive:
+1. An image of the current sketch on the canvas
+2. An instruction to ADD a new element
+
+=== Rules ===
+- Study the image carefully to understand what is already drawn
+- ONLY output strokes for the NEW element being added
+- Do NOT repeat or redraw existing strokes
+- Place the new element in the position specified by the user
+- Maintain the same hand-drawn style — slight wobbles, no perfect geometry
+- Use the same stroke format (points + t_values)
+
+=== Output format ===
+Output ONLY in XML format. NO markdown code fences.
+
+<thinking>Brief analysis of what the image shows, and where to place the new element.</thinking>
+<strokes>
+  <s1>
+    <points>'x...y...', ...</points>
+    <t_values>0.00, ...</t_values>
+    <id>description</id>
+  </s1>
+</strokes>
+
+IMPORTANT: Output ONLY the strokes for the new element. The system will combine them with the existing sketch.`
+
 // ============================================================
 // API Endpoints
 // ============================================================
@@ -281,7 +331,7 @@ IMPORTANT: Output the COMPLETE set of strokes for the edited sketch — both the
  * Generate a hand-drawn sketch from text description via MiMo.
  */
 app.post('/api/sketch', async (req, res) => {
-  const { text } = req.body
+  const { text, zone } = req.body
 
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing text parameter' })
@@ -297,7 +347,7 @@ app.post('/api/sketch', async (req, res) => {
       model: getActiveModel(),
       messages: [
         { role: 'system', content: SKETCH_SYSTEM_PROMPT },
-        { role: 'user', content: buildSketchUserPrompt(text) },
+        { role: 'user', content: buildSketchUserPrompt(text, typeof zone === 'string' ? zone : null) },
       ],
       temperature: 0.3,
       max_tokens: 4000,
@@ -323,7 +373,7 @@ app.post('/api/sketch', async (req, res) => {
  * Edit an existing sketch via MiMo with multimodal input (image + text).
  */
 app.post('/api/sketch-edit', async (req, res) => {
-  const { instruction, currentImage, previousConcept } = req.body
+  const { instruction, currentImage, previousConcept, accumulate } = req.body
 
   if (!instruction || typeof instruction !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing instruction parameter' })
@@ -334,11 +384,20 @@ app.post('/api/sketch-edit', async (req, res) => {
     return res.json({ ok: false, error: 'LLM not configured' })
   }
 
+  const isAccumulate = accumulate === true
+  const editPrompt = isAccumulate ? SKETCH_EDIT_ADD_PROMPT : SKETCH_EDIT_SYSTEM_PROMPT
+  const editUserText = isAccumulate
+    ? `Current sketch concept: ${previousConcept || 'unknown'}
+Add instruction: ${instruction}
+
+Output ONLY the strokes for the new element. Do NOT repeat existing strokes.`
+    : `Current sketch concept: ${previousConcept || 'unknown'}
+Edit instruction: ${instruction}
+
+Output the COMPLETE updated strokes. Keep all unrelated strokes unchanged, only modify what the instruction asks for.`
+
   const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
-    {
-      type: 'text',
-      text: `Current sketch concept: ${previousConcept || 'unknown'}\nEdit instruction: ${instruction}\n\nOutput the COMPLETE updated strokes. Keep all unrelated strokes unchanged, only modify what the instruction asks for.`,
-    },
+    { type: 'text', text: editUserText },
   ]
 
   if (currentImage && typeof currentImage === 'string' && currentImage.startsWith('data:image/')) {
@@ -352,7 +411,7 @@ app.post('/api/sketch-edit', async (req, res) => {
     const completion = await client.chat.completions.create({
       model: getActiveModel(),
       messages: [
-        { role: 'system', content: SKETCH_EDIT_SYSTEM_PROMPT },
+        { role: 'system', content: editPrompt },
         { role: 'user', content: userContent as OpenAI.Chat.Completions.ChatCompletionMessage['content'] },
       ],
       temperature: 0.3,
@@ -412,7 +471,7 @@ app.post('/api/parse-command', async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: `You are a drawing command parser. Convert natural language Chinese commands into JSON.\n\nSchema:\n${schema}\n\nRules: Canvas 800x500. Colors: #ef4444 red, #3b82f6 blue, #22c55e green, #eab308 yellow, #111827 black, #f9fafb white. Do NOT wrap in markdown. Output raw JSON.`,
+          content: `You are a drawing command parser. Convert natural language Chinese commands into JSON.\n\nSchema:\n${schema}\n\n=== Spatial Reference (50×50 Grid) ===\nThe canvas is 800×500 pixels. Think of it as a 50×50 grid for spatial reasoning:\n- x: 1→50 maps to 0→800 pixels (left→right)\n- y: 1→50 maps to 0→500 pixels (bottom→top)\n\n9 spatial zones with approximate pixel centers:\n  center:       (400, 250)   top:       (400, 380)   bottom:    (400, 120)\n  left:         (150, 250)   right:     (650, 250)\n  topLeft:      (150, 380)   topRight:  (650, 380)\n  bottomLeft:   (150, 120)   bottomRight:(650, 120)\n\nUse the grid for spatial reasoning, but return final shape coordinates in pixels.\nWhen the user mentions a spatial location (左边/右边/上面/下面/左上角/右上角/左下角/右下角/中间),\nplace the shape in the corresponding zone. For multiple objects, distribute across different zones.\n\nColors: #ef4444 red, #3b82f6 blue, #22c55e green, #eab308 yellow, #111827 black, #f9fafb white.\nDo NOT wrap in markdown. Output raw JSON.`,
         },
         { role: 'user', content: text },
       ],

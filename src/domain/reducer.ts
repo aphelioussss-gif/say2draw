@@ -159,6 +159,13 @@ export function drawingReducer(
     }
   }
 
+  if (action.type === 'generate_sketch') {
+    return {
+      ...state,
+      history: pushHistory(state, createRecord(action, 'success', `Generating sketch: ${action.rawText}`)),
+    }
+  }
+
   if (action.type === 'parse_error') {
     return {
       ...state,

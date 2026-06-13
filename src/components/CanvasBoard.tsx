@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { forwardRef, useEffect, useRef } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, type Shape } from '../domain/shapes'
 
 type CanvasBoardProps = {
   shapes: Shape[]
+  hasOverlayContent?: boolean
 }
 
 const DEFAULT_STROKE = '#1f2937'
@@ -117,8 +118,10 @@ function drawEmptyState(ctx: CanvasRenderingContext2D) {
   ctx.restore()
 }
 
-export function CanvasBoard({ shapes }: CanvasBoardProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+export const CanvasBoard = forwardRef<HTMLCanvasElement, CanvasBoardProps>(
+  ({ shapes, hasOverlayContent = false }, ref) => {
+  const internalRef = useRef<HTMLCanvasElement>(null)
+  const canvasRef = (ref as React.RefObject<HTMLCanvasElement>) || internalRef
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -139,13 +142,13 @@ export function CanvasBoard({ shapes }: CanvasBoardProps) {
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
 
-    if (shapes.length === 0) {
+    if (shapes.length === 0 && !hasOverlayContent) {
       drawEmptyState(ctx)
       return
     }
 
     shapes.forEach((shape) => drawShape(ctx, shape))
-  }, [shapes])
+  }, [shapes, hasOverlayContent])
 
   return (
     <canvas
@@ -156,4 +159,6 @@ export function CanvasBoard({ shapes }: CanvasBoardProps) {
       height={CANVAS_HEIGHT}
     />
   )
-}
+})
+
+CanvasBoard.displayName = 'CanvasBoard'

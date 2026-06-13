@@ -44,6 +44,10 @@ export type DrawingAction =
       patch: ShapePatch
     })
   | (CommandMeta & {
+      type: 'generate_sketch'
+      message: string
+    })
+  | (CommandMeta & {
       type: 'parse_error'
       message: string
     })

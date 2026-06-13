@@ -3,18 +3,27 @@ import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
 import { DevControls } from './components/DevControls'
 import { VoicePanel } from './components/VoicePanel'
+import { SketchLayer } from './components/SketchLayer'
 import { getActionFeedback, getBatchFeedback, getSketchEnterFeedback, getSketchModifierFeedback } from './domain/feedback'
 import {
   drawingReducer,
   initialDrawingState,
 } from './domain/reducer'
-import type { Shape } from './domain/shapes'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, type Shape } from './domain/shapes'
 import type { DrawingAction, ActiveSketch, ShapePatch } from './domain/actions'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
 import { useLLMStatus } from './hooks/useLLMStatus'
 import { routeCommands } from './parser/commandRouter'
+import { isDrawingIntent } from './parser/sketchIntent'
+import { parseSketchXML } from './sketch/sketchParser'
+import { fitBezierCurve } from './sketch/bezierFitter'
+import { gridToPixel } from './sketch/svgRenderer'
+import { captureCanvas } from './sketch/canvasCapture'
+import type { RenderedStroke, RawStroke, BezierSegment, ControlPoint } from './sketch/types'
 import './App.css'
+
+const GRID_RES = 50
 
 const commandExamples = [
   '画一个红色圆形',
@@ -67,6 +76,92 @@ const devShapeTemplates: Shape[] = [
   },
 ]
 
+function getSketchPixelBounds(strokes: ControlPoint[][]) {
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+
+  strokes.forEach((stroke) => {
+    stroke.forEach(([x, y]) => {
+      minX = Math.min(minX, x)
+      minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x)
+      maxY = Math.max(maxY, y)
+    })
+  })
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+    return null
+  }
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  }
+}
+
+function normalizeSketchPoints(strokes: ControlPoint[][]): ControlPoint[][] {
+  const bounds = getSketchPixelBounds(strokes)
+  if (!bounds) return strokes
+
+  const targetWidth = CANVAS_WIDTH * 0.68
+  const targetHeight = CANVAS_HEIGHT * 0.68
+  const minTargetWidth = CANVAS_WIDTH * 0.36
+  const minTargetHeight = CANVAS_HEIGHT * 0.34
+  const fitScale = Math.min(targetWidth / bounds.width, targetHeight / bounds.height)
+  const readableScale = Math.max(minTargetWidth / bounds.width, minTargetHeight / bounds.height)
+  const scale = Math.max(0.55, Math.min(1.22, fitScale, readableScale))
+  const centerX = bounds.minX + bounds.width / 2
+  const centerY = bounds.minY + bounds.height / 2
+  const targetCenterX = CANVAS_WIDTH / 2
+  const targetCenterY = CANVAS_HEIGHT / 2
+
+  return strokes.map((stroke) =>
+    stroke.map(([x, y]) => [
+      targetCenterX + (x - centerX) * scale,
+      targetCenterY + (y - centerY) * scale,
+    ]),
+  )
+}
+
+// ---- Helper: fit LLM strokes into renderable segments ----
+function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
+  const pixelStrokes = rawStrokes.map((raw) =>
+    raw.points.map((cell) => {
+      const m = cell.match(/x(\d+)y(\d+)/)
+      if (!m) return [0, 0] as [number, number]
+      return gridToPixel(parseInt(m[1], 10), parseInt(m[2], 10), GRID_RES, CANVAS_WIDTH, CANVAS_HEIGHT)
+    }),
+  )
+  const normalizedStrokes = normalizeSketchPoints(pixelStrokes)
+
+  return rawStrokes.map((raw, i) => {
+    const sampledPoints = normalizedStrokes[i] ?? []
+    const tValues = raw.tValues.length === sampledPoints.length
+      ? raw.tValues
+      : Array.from({ length: sampledPoints.length }, (_, j) =>
+          sampledPoints.length === 1 ? 0 : j / (sampledPoints.length - 1),
+        )
+
+    const segments = fitBezierCurve(sampledPoints as [number, number][], tValues)
+
+    // filter out empty segments
+    const validSegments: BezierSegment[] = segments.filter(
+      (seg) => seg.length > 0,
+    )
+
+    return {
+      id: raw.id || `stroke-${i}`,
+      segments: validSegments,
+    }
+  }).filter((s) => s.segments.length > 0)
+}
+
 function App() {
   const [state, dispatch] = useReducer(drawingReducer, initialDrawingState)
   const [feedbackMessage, setFeedbackMessage] = useState('')
@@ -76,7 +171,16 @@ function App() {
   const speechFeedback = useSpeechSynthesis()
   const llmStatus = useLLMStatus()
 
-  // --- Sketch Mode Helpers (defined before useSpeechRecognition for closure access) ---
+  // ---- Sketch stroke state ----
+  const [sketchStrokes, setSketchStrokes] = useState<RenderedStroke[]>([])
+  const [sketchMode, setSketchMode] = useState<{
+    concept: string
+    rawStrokes: RawStroke[]
+  } | null>(null)
+  const [isGeneratingSketch, setIsGeneratingSketch] = useState(false)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // ---- Helpers ----
 
   const COLOR_MAP: Record<string, string> = {
     '红色': '#ef4444', '红': '#ef4444',
@@ -103,9 +207,136 @@ function App() {
     return /^(长一点|长一些|加长|短一点|短一些|缩短|大一点|大一些|放大|小一点|小一些|缩小|往左|往右|往上|往下|颜色改|改颜色|重来|就这样|可以了|好了|算了|不画了)/.test(t)
   }
 
-  function isDrawingIntent(rawText: string): boolean {
-    return /^(画|绘制|加|添加)/.test(rawText.trim())
+  // ---- Sketch generation ----
+
+  async function handleGenerateSketch(rawText: string) {
+    setIsGeneratingSketch(true)
+    setFeedbackMessage('正在绘制草图...')
+    speechFeedback.speak('正在绘制草图...', {
+      onEnd: () => { /* keep waiting for API response */ },
+    })
+
+    try {
+      const res = await fetch('/api/sketch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: rawText }),
+      })
+      const data = await res.json()
+
+      if (data.ok && data.sketch) {
+        console.log('[Sketch] Response received, length:', data.sketch.length)
+        const parsed = parseSketchXML(data.sketch, GRID_RES)
+        console.log('[Sketch] Parsed:', parsed ? `${parsed.strokes.length} strokes` : 'NULL')
+        if (parsed && parsed.strokes.length > 0) {
+          const rendered = fitAndRenderStrokes(parsed.strokes)
+          console.log('[Sketch] Rendered:', rendered.length, 'renderable strokes')
+          setSketchStrokes(rendered)
+          setSketchMode({ concept: parsed.concept, rawStrokes: parsed.strokes })
+
+          dispatch({
+            type: 'generate_sketch',
+            rawText,
+            parseSource: 'llm',
+            createdAt: createTimestamp(),
+            message: `Generated sketch: ${parsed.concept}`,
+          })
+
+          const message = `已为你画了${parsed.concept}的草图`
+          setFeedbackMessage(message)
+          speechFeedback.speak(message, {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+      }
+
+      // Fallback to geometric sketch
+      const objectName = extractObjectName(rawText)
+      if (objectName) {
+        setSketchStrokes([])
+        setSketchMode(null)
+        enterSketchMode(objectName)
+        return
+      }
+
+      setFeedbackMessage('草图生成失败，请重试')
+      speechFeedback.speak('草图生成失败，请重试', {
+        onEnd: () => {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+        },
+      })
+    } catch {
+      setFeedbackMessage('网络错误，请重试')
+      speechFeedback.speak('网络错误，请重试', {
+        onEnd: () => {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+        },
+      })
+    } finally {
+      setIsGeneratingSketch(false)
+    }
   }
+
+  // ---- Sketch editing (multimodal) ----
+
+  async function handleSketchEdit(instruction: string) {
+    if (!sketchMode) return
+
+    setIsGeneratingSketch(true)
+    const screenshot = captureCanvas(canvasRef.current)
+
+    try {
+      const res = await fetch('/api/sketch-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instruction,
+          currentImage: screenshot,
+          previousConcept: sketchMode.concept,
+        }),
+      })
+      const data = await res.json()
+
+      if (data.ok && data.sketch) {
+        const parsed = parseSketchXML(data.sketch, GRID_RES)
+        if (parsed && parsed.strokes.length > 0) {
+          const rendered = fitAndRenderStrokes(parsed.strokes)
+          setSketchStrokes(rendered)
+          setSketchMode({ ...sketchMode, rawStrokes: parsed.strokes })
+
+          const feedback = `好的，已按"${instruction}"调整`
+          setFeedbackMessage(feedback)
+          speechFeedback.speak(feedback, {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+      }
+
+      setFeedbackMessage('调整失败，请重试')
+      speechFeedback.speak('调整失败，请重试', {
+        onEnd: () => {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+        },
+      })
+    } catch {
+      setFeedbackMessage('网络错误，请重试')
+      speechFeedback.speak('网络错误，请重试', {
+        onEnd: () => {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+        },
+      })
+    } finally {
+      setIsGeneratingSketch(false)
+    }
+  }
+
+  // ---- Sketch mode modifiers (geometry fallback) ----
 
   function moveAllShapes(dx: number, dy: number) {
     const sketch = activeSketchRef.current
@@ -156,19 +387,14 @@ function App() {
     if (/^重来/.test(t)) {
       const initialMain = sketch.initialShapes[0]
       if (initialMain.type === 'rect') {
-        const patchUpdate: ShapePatch = {
-          x: initialMain.x, y: initialMain.y,
-          width: initialMain.width, height: initialMain.height,
-          fill: initialMain.fill,
-        }
         dispatch({
-          type: 'update_shape', shapeId: mainShapeId, patch: patchUpdate,
+          type: 'update_shape', shapeId: mainShapeId,
+          patch: { x: initialMain.x, y: initialMain.y, width: initialMain.width, height: initialMain.height, fill: initialMain.fill },
           rawText, parseSource: 'local', createdAt: createTimestamp(),
         })
       }
-      const updated = { ...sketch, round: 0 }
-      activeSketchRef.current = updated
-      setActiveSketch(updated)
+      activeSketchRef.current = { ...sketch, round: 0 }
+      setActiveSketch({ ...sketch, round: 0 })
       setFeedbackMessage(feedback)
       speechFeedback.speak(feedback, { onEnd: done })
       return
@@ -183,9 +409,8 @@ function App() {
           sketch.shapeIds.forEach((id) => {
             dispatch({ type: 'update_shape', shapeId: id, patch: { fill: hex }, rawText, parseSource: 'local', createdAt: createTimestamp() })
           })
-          const updated = { ...sketch, round: sketch.round + 1 }
-          activeSketchRef.current = updated
-          setActiveSketch(updated)
+          activeSketchRef.current = { ...sketch, round: sketch.round + 1 }
+          setActiveSketch({ ...sketch, round: sketch.round + 1 })
           setFeedbackMessage(feedback)
           speechFeedback.speak(feedback, { onEnd: done })
           return
@@ -211,33 +436,29 @@ function App() {
       patch = { scale: 0.8 }
     } else if (/^往左/.test(t)) {
       moveAllShapes(-30, 0)
-      const updated = { ...sketch, round: sketch.round + 1 }
-      activeSketchRef.current = updated
-      setActiveSketch(updated)
+      activeSketchRef.current = { ...sketch, round: sketch.round + 1 }
+      setActiveSketch({ ...sketch, round: sketch.round + 1 })
       setFeedbackMessage(feedback)
       speechFeedback.speak(feedback, { onEnd: done })
       return
     } else if (/^往右/.test(t)) {
       moveAllShapes(30, 0)
-      const updated = { ...sketch, round: sketch.round + 1 }
-      activeSketchRef.current = updated
-      setActiveSketch(updated)
+      activeSketchRef.current = { ...sketch, round: sketch.round + 1 }
+      setActiveSketch({ ...sketch, round: sketch.round + 1 })
       setFeedbackMessage(feedback)
       speechFeedback.speak(feedback, { onEnd: done })
       return
     } else if (/^往上/.test(t)) {
       moveAllShapes(0, -30)
-      const updated = { ...sketch, round: sketch.round + 1 }
-      activeSketchRef.current = updated
-      setActiveSketch(updated)
+      activeSketchRef.current = { ...sketch, round: sketch.round + 1 }
+      setActiveSketch({ ...sketch, round: sketch.round + 1 })
       setFeedbackMessage(feedback)
       speechFeedback.speak(feedback, { onEnd: done })
       return
     } else if (/^往下/.test(t)) {
       moveAllShapes(0, 30)
-      const updated = { ...sketch, round: sketch.round + 1 }
-      activeSketchRef.current = updated
-      setActiveSketch(updated)
+      activeSketchRef.current = { ...sketch, round: sketch.round + 1 }
+      setActiveSketch({ ...sketch, round: sketch.round + 1 })
       setFeedbackMessage(feedback)
       speechFeedback.speak(feedback, { onEnd: done })
       return
@@ -254,9 +475,8 @@ function App() {
       }
     }
 
-    const updated = { ...sketch, round: sketch.round + 1 }
-    activeSketchRef.current = updated
-    setActiveSketch(updated)
+    activeSketchRef.current = { ...sketch, round: sketch.round + 1 }
+    setActiveSketch({ ...sketch, round: sketch.round + 1 })
     setFeedbackMessage(feedback)
     speechFeedback.speak(feedback, { onEnd: done })
   }
@@ -296,21 +516,42 @@ function App() {
     })
   }
 
-  // --- Speech Recognition ---
+  // ---- Speech Recognition ----
 
   const speech = useSpeechRecognition({
     shouldIgnoreResult: () => speechFeedback.isSpeaking,
     onFinalTranscript: (transcript) => {
       speech.pauseListening()
 
-      // Check sketch mode modifier first
-      if (activeSketchRef.current && isSketchModifier(transcript)) {
-        handleSketchModifier(transcript)
-        return
+      // Sketch modifier routing: dual-mode
+      if (isSketchModifier(transcript)) {
+        // Exit commands apply to both modes
+        if (/^(就这样|可以了|好了|算了|不画了)/.test(transcript.trim())) {
+          if (sketchMode !== null) {
+            setSketchMode(null)
+            setFeedbackMessage('好的，草图已确认')
+            speechFeedback.speak('好的，草图已确认', {
+              onEnd: () => {
+                if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+              },
+            })
+            return
+          }
+        }
+        // Sketch mode → multimodal edit
+        if (sketchMode !== null) {
+          handleSketchEdit(transcript)
+          return
+        }
+        // Geometry mode → local transform
+        if (activeSketchRef.current) {
+          handleSketchModifier(transcript)
+          return
+        }
       }
 
-      // If in sketch mode and user starts a new drawing, exit sketch mode
-      if (activeSketchRef.current && isDrawingIntent(transcript)) {
+      // If in sketch/geometry mode and new drawing starts, exit old mode
+      if (isDrawingIntent(transcript)) {
         setActiveSketch(null)
         activeSketchRef.current = null
       }
@@ -318,42 +559,68 @@ function App() {
       setFeedbackMessage('思考中...')
 
       routeCommands(transcript).then((actions) => {
-        // Fallback sketch: all actions are parse_error but user had drawing intent
+        // Intercept generate_sketch — the unified drawing pipeline
+        const sketchAction = actions.find((a) => a.type === 'generate_sketch')
+        if (sketchAction) {
+          handleGenerateSketch(transcript)
+          return
+        }
+
+        // Fallback sketch: all errors + drawing intent → geometric fallback
         const allErrors = actions.length > 0 && actions.every((a) => a.type === 'parse_error')
         if (allErrors && isDrawingIntent(transcript)) {
           const objectName = extractObjectName(transcript)
           if (objectName) {
+            setSketchStrokes([])
+            setSketchMode(null)
             enterSketchMode(objectName)
             return
           }
         }
 
+        // Batch execution with dual-layer clear/undo
         if (actions.length > 1) {
-          actions.forEach((action) => dispatch(action))
-          const message = getBatchFeedback(actions, transcript)
-          setFeedbackMessage(message)
-          speechFeedback.speak(message, {
-            onEnd: () => {
-              if (!speech.isManuallyPausedRef.current) {
-                speech.resumeListening()
-              }
-            },
-          })
+          handleBatchActions(actions, transcript)
           return
         }
 
         executeBatch(actions, 0)
       })
 
+      function handleBatchActions(actions: DrawingAction[], rawText: string) {
+        // Filter sketch actions
+        const sketchActs = actions.filter((a) => a.type === 'generate_sketch')
+        if (sketchActs.length > 0) {
+          handleGenerateSketch(rawText)
+          return
+        }
+
+        actions.forEach((action) => {
+          applyActionWithDualLayer(action)
+        })
+        const message = getBatchFeedback(actions, rawText)
+        setFeedbackMessage(message)
+        speechFeedback.speak(message, {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+      }
+
       function executeBatch(actions: DrawingAction[], index: number) {
         if (index >= actions.length) {
-          if (!speech.isManuallyPausedRef.current) {
-            speech.resumeListening()
-          }
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
           return
         }
 
         const action = actions[index]
+        const handled = applyActionWithDualLayer(action)
+
+        if (handled) {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          return
+        }
+
         const message = getActionFeedback(action)
         dispatch(action)
         setFeedbackMessage(message)
@@ -362,6 +629,42 @@ function App() {
             executeBatch(actions, index + 1)
           },
         })
+      }
+
+      /** Apply action with dual-layer clear/undo. Returns true if handled here. */
+      function applyActionWithDualLayer(action: DrawingAction): boolean {
+        if (action.type === 'generate_sketch') {
+          handleGenerateSketch(action.rawText)
+          return true
+        }
+
+        if (action.type === 'clear_canvas') {
+          dispatch(action)
+          setSketchStrokes([])
+          setSketchMode(null)
+          setActiveSketch(null)
+          activeSketchRef.current = null
+          return false // let caller handle feedback
+        }
+
+        if (action.type === 'undo') {
+          // Sketch layer takes priority
+          if (sketchStrokes.length > 0) {
+            setSketchStrokes([])
+            setSketchMode(null)
+            setFeedbackMessage('已撤销草图')
+            speechFeedback.speak('已撤销草图', {
+              onEnd: () => {
+                if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+              },
+            })
+            return true
+          }
+          dispatch(action)
+          return false
+        }
+
+        return false
       }
     },
   })
@@ -393,10 +696,20 @@ function App() {
       parseSource: 'dev',
       createdAt: createTimestamp(),
     })
+    setSketchStrokes([])
+    setSketchMode(null)
+    setActiveSketch(null)
+    activeSketchRef.current = null
     setFeedbackMessage('已清空画布')
   }
 
   function handleUndo() {
+    if (sketchStrokes.length > 0) {
+      setSketchStrokes([])
+      setSketchMode(null)
+      setFeedbackMessage('已撤销草图')
+      return
+    }
     dispatch({
       type: 'undo',
       rawText: 'DEV undo',
@@ -434,14 +747,24 @@ function App() {
           isFeedbackVoiceSupported={speechFeedback.isSupported}
           llmStatus={llmStatus}
           activeSketch={activeSketch}
+          isGeneratingSketch={isGeneratingSketch}
         />
 
         <section className="canvas-area" aria-label="Canvas board">
-          <div className="canvas-stage">
-            <CanvasBoard shapes={state.shapes} />
+          <div className="canvas-stage" style={{ position: 'relative' }}>
+            <CanvasBoard
+              ref={canvasRef}
+              shapes={state.shapes}
+              hasOverlayContent={sketchStrokes.length > 0}
+            />
+            <SketchLayer
+              strokes={sketchStrokes}
+              width={CANVAS_WIDTH}
+              height={CANVAS_HEIGHT}
+            />
             <DevControls
               shapes={state.shapes}
-              canUndo={state.past.length > 0}
+              canUndo={state.past.length > 0 || sketchStrokes.length > 0}
               onAddShape={handleAddShape}
               onClearCanvas={handleClearCanvas}
               onUndo={handleUndo}

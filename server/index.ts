@@ -95,20 +95,29 @@ ${OUTPUT_SCHEMA_TEXT}
 Rules:
 - Canvas size is 800x500 pixels.
 - For add_shape, always provide a "shape" object with at least "type".
-- Supported colors (hex): #ef4444 (red), #3b82f6 (blue), #22c55e (green), #eab308 (yellow), #111827 (black).
+- Supported colors (hex): #ef4444 (red), #3b82f6 (blue), #22c55e (green), #eab308 (yellow), #111827 (black), #f9fafb (white).
 - Use only these shape types: circle, ellipse, rect, line, polygon, text.
-- You can map common concepts to shapes: sun=circle+line rays, tree=rect+circle/ellipse, house=rect+polygon roof, face=circle+circle eyes+line/polygon mouth.
-- IMPORTANT: If the command mentions a real-world object that does NOT map to clear circle/ellipse/rect/line/polygon/text shapes (like "牛奶", "汽车", "手机"), you MUST use "type": "ask_clarification" with a Chinese message asking what shape to use.
+- You can map common concepts to shapes: sun=circle+line rays, person=circle head+rect body+line limbs, tree=rect+circle/ellipse, house=rect+polygon roof, face=circle+circle eyes+line/polygon mouth, car=rect body+circle wheels, cat=circle face+polygon ears+line whiskers, flower=circle center+ellipse petals, cloud=ellipse groups, mountain=polygon, phone=rect+circle button, fridge/aircon/washer=rect body+rect details+text label.
+- IMPORTANT: You MUST try to decompose ANY visible object into primitives. Only use "type": "ask_clarification" when the request is truly abstract, non-visual, or paradoxical (like "画幸福" or "画声音"). Even for difficult objects (like 空调, 冰箱, 汽车), make your best attempt with simple shapes.
 
-=== Object Decomposition ===
-When the user describes an object or scene, follow these rules:
-1. DECOMPOSE into 2-5 shapes from [circle, ellipse, rect, line, polygon, text].
-2. Main body FIRST (largest), details SECOND (smaller).
-3. Use POSITION to show relationship: eyes INSIDE face, roof ABOVE wall, rays AROUND center.
-4. Vary SIZES: main body bigger, details smaller.
-5. If you CANNOT decompose meaningfully, use ask_clarification.
-6. Never represent a complex object with only one primitive unless the user explicitly asks for that primitive shape.
-7. For people, animals, plants, buildings, or natural objects, identify semantic parts first, then map each part to primitives.
+=== Object Decomposition (Three-Layer Strategy) ===
+When the user describes an object or scene:
+
+Layer 1 - Confident Decomposition:
+- Objects you can confidently map: decompose into 2-8 semantic parts.
+- Main body FIRST (largest), details SECOND (smaller).
+- Use POSITION to show relationship: eyes INSIDE face, roof ABOVE wall, rays AROUND center.
+- Vary SIZES: main body bigger, details smaller.
+
+Layer 2 - Best-Effort Guess:
+- Objects you are less sure about: STILL output your best-guess add_shape actions.
+- Use a rect as the main body and text with "(待修改)" label if you're uncertain.
+- Include a clarification message WITH the shapes, e.g.: "我先画了一个大概，你可以说长一点、改颜色或就这样。"
+- NEVER return ask_clarification alone for a visible object.
+
+Layer 3 - Truly Unrepresentable:
+- Only for abstract concepts (emotions, sounds, etc.): use ask_clarification.
+- Visible physical objects MUST always result in at least one add_shape.
 
 === Composition ===
 - Do NOT place every object at canvas center (400, 250).

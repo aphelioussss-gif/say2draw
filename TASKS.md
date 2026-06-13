@@ -74,8 +74,9 @@ MVP 判断标准：
 | PR 9  | Done   | feat/llm-parser              | feat: add llm structured command parser          | -          | 2026-06-12   | OpenAI-compatible LLM 兜底            |
 | PR 10 | In Progress | feat/batch-actions        | feat: support batch actions and clarification    | -          | -            | 复杂指令拆解与澄清                            |
 | PR 11 | Todo   | docs/finalize-submission     | docs: finalize readme design doc and demo script | -          | -            | README / DESIGN / Demo 视频            |
-| PR 14 | In Progress | feat/expressiveness-upgrade | feat: improve drawing expressiveness             | -          | -            | 新增 ellipse/polygon、prompt 构图增强、坐标 jitter |
-| PR 15 | Todo   | feat/self-decomposition-primitives | feat: add self-decomposition drawing primitives  | -          | -            | 讨论 polyline / arc / curve，让 LLM 自我拆解对象 |
+| PR 14 | Done   | feat/expressiveness-upgrade | feat: improve drawing expressiveness             | 9dd512b    | 2026-06-12   | 新增 ellipse/polygon、prompt 构图增强、坐标 jitter |
+| PR 15 | Done   | feat/self-decomposition-primitives | feat: add self-decomposition drawing primitives  | a455529    | 2026-06-13   | 新增 polyline / arc，canvas 渲染 + server prompt 拆解规则 |
+| PR 16 | In Progress | feat/fallback-sketch-mode | feat: add fallback sketch refinement mode         | -          | -            | 三层降级：parse_error → fallback sketch → 语音打磨 |
 
 Status 可选值：
 
@@ -808,6 +809,69 @@ docs: finalize readme design doc and demo script
 
 ```text
 docs: finalize readme design doc and demo script
+```
+
+---
+
+### PR 16：三层降级 Fallback Sketch Mode
+
+Branch:
+
+```text
+feat/fallback-sketch-mode
+```
+
+Title:
+
+```text
+feat: add fallback sketch refinement mode
+```
+
+目标：
+
+* AI 无法可靠拆解对象时生成保守草图，不返回空结果。
+* 用户随后用自然语言逐轮打磨草图。
+* 新增 `update_shape` action 支持局部修改已有图形。
+* VoicePanel 新增草图打磨状态卡。
+
+涉及文件：
+
+* `src/domain/actions.ts`
+* `src/domain/reducer.ts`
+* `src/domain/feedback.ts`
+* `src/App.tsx`
+* `src/components/VoicePanel.tsx`
+* `src/parser/commandRouter.ts`
+* `server/index.ts`
+* `docs/PRD.md`
+* `docs/DESIGN.md`
+* `README.md`
+* `TASKS.md`
+
+验收标准：
+
+* [ ] 说"画空调"时系统生成矩形 + 文本草图，不返回空结果。
+* [ ] 接着说"长一点"：主图形变宽。
+* [ ] 接着说"往右移"：草图整体右移。
+* [ ] 接着说"颜色改成白色"：草图颜色更新。
+* [ ] 接着说"重来"：恢复初始草图。
+* [ ] 接着说"就这样"：退出 Sketch Mode。
+* [ ] 退出后说普通绘图命令，不再修改旧草图。
+* [ ] undo 能撤销最近一次草图修改。
+* [ ] 草图打磨卡片状态正确。
+* [ ] `npm run lint` 通过。
+* [ ] `npm run build` 通过。
+
+不包含：
+
+* 不做完整第 2 层确认流。
+* 不新增对象模板词典。
+* 不新增手动按钮，不改变纯语音控制约束。
+
+建议 commit:
+
+```text
+feat: add fallback sketch refinement mode
 ```
 
 ---

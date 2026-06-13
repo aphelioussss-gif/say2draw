@@ -1,9 +1,12 @@
 import { useRef, useReducer, useState } from 'react'
 import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
-import { VoicePanel } from './components/VoicePanel'
 import { SketchLayer } from './components/SketchLayer'
 import { PlanCompanion } from './components/PlanCompanion'
+import { SidebarNav } from './components/SidebarNav'
+import { ConfigPage } from './components/ConfigPage'
+import { VoiceStatusBar } from './components/VoiceStatusBar'
+import { ModePresetPanel } from './components/ModePresetPanel'
 import { getActionFeedback, getBatchFeedback } from './domain/feedback'
 import {
   drawingReducer,
@@ -21,21 +24,16 @@ import { fitBezierCurve } from './sketch/bezierFitter'
 import { gridToPixel } from './sketch/svgRenderer'
 import { captureCanvas } from './sketch/canvasCapture'
 import type { RenderedStroke, RawStroke, BezierSegment, ControlPoint } from './sketch/types'
+import {
+  type AppPage,
+  type DrawingMode,
+  MODE_PRESETS,
+  isDrawingMode,
+  CONFIG_MODE,
+} from './components/ModePresets'
 import './App.css'
 
 const GRID_RES = 50
-
-const commandExamples = [
-  { label: '快速草图', text: '画一个红色太阳，下面有一棵绿色树' },
-  { label: '课堂讲解', text: '画太阳、地球和月亮，表示月亮绕地球转' },
-  { label: '流程白板', text: '画一个从登录到支付的流程图' },
-  { label: '故事场景', text: '画一个小女孩站在月亮下面' },
-]
-
-const systemCommands = [
-  '撤销',
-  '清空画布',
-]
 
 function getSketchPixelBounds(strokes: ControlPoint[][]) {
   let minX = Number.POSITIVE_INFINITY
@@ -90,7 +88,6 @@ function normalizeSketchPoints(strokes: ControlPoint[][]): ControlPoint[][] {
   )
 }
 
-// ---- Helper: fit LLM strokes into renderable segments ----
 function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
   const pixelStrokes = rawStrokes.map((raw) =>
     raw.points.map((cell) => {
@@ -111,7 +108,6 @@ function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
 
     const segments = fitBezierCurve(sampledPoints as [number, number][], tValues)
 
-    // filter out empty segments
     const validSegments: BezierSegment[] = segments.filter(
       (seg) => seg.length > 0,
     )
@@ -130,13 +126,15 @@ function App() {
   const speechFeedback = useSpeechSynthesis()
   const llmStatus = useLLMStatus()
 
+  // ---- Page navigation ----
+  const [activePage, setActivePage] = useState<AppPage>('story_scene')
+
   // ---- Sketch stroke state ----
   const [sketchStrokes, setSketchStrokes] = useState<RenderedStroke[]>([])
   const [sketchMode, setSketchMode] = useState<{
     concept: string
     rawStrokes: RawStroke[]
   } | null>(null)
-  // TODO(PR19): add loading overlay when isGeneratingSketch is true
   const [, setIsGeneratingSketch] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -154,6 +152,10 @@ function App() {
     elements: Array<{ name: string; position: string; color: string; role: string; details?: string[] }>
   }
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null)
+
+  // ---- Current drawing mode (only meaningful on drawing pages) ----
+  const activeMode: DrawingMode = isDrawingMode(activePage) ? activePage : 'story_scene'
+  const currentPreset = MODE_PRESETS[activeMode]
 
   // ---- Helpers ----
 
@@ -202,7 +204,6 @@ function App() {
     return { cx: (bb.minX + bb.maxX) / 2, cy: (bb.minY + bb.maxY) / 2 }
   }
 
-  /** Try up to 5 offset attempts to avoid overlap. Returns adjusted shape or original. */
   function avoidOverlap(shape: Shape, existing: Shape[]): Shape {
     if (existing.length === 0) return shape
     const bb = shapeBBox(shape)
@@ -219,7 +220,7 @@ function App() {
         return candidate
       }
     }
-    return shape // give up, accept overlap
+    return shape
   }
 
   function shiftShapePixels(shape: Shape, dx: number, dy: number): Shape {
@@ -242,14 +243,11 @@ function App() {
     'center', 'top', 'left', 'right', 'bottom', 'topLeft', 'topRight', 'bottomLeft', 'bottomRight',
   ]
 
-  /** Check if shapes are all close to default center — meaning they need distribution. */
   function shapesNeedDistribution(shapes: Shape[]): boolean {
     if (shapes.length <= 1) return false
-    // If more than 2 shapes with same-ish center → distribute
     const centers = shapes.map(shapeCenter)
     const allNearCenter = centers.every((c) => Math.abs(c.cx - 400) < 20 && Math.abs(c.cy - 250) < 20)
     if (allNearCenter) return true
-    // If any two shapes overlap → distribute
     for (let i = 0; i < shapes.length; i++) {
       for (let j = i + 1; j < shapes.length; j++) {
         if (boxesOverlap(shapeBBox(shapes[i]), shapeBBox(shapes[j]))) return true
@@ -258,7 +256,6 @@ function App() {
     return false
   }
 
-  /** Distribute shapes across zones, avoiding overlap with existing shapes. */
   function distributeShapes(shapes: Shape[], existing: Shape[]): Shape[] {
     return shapes.map((shape, i) => {
       const zoneKey = ZONE_DIST_ORDER[i % ZONE_DIST_ORDER.length]
@@ -276,7 +273,6 @@ function App() {
   // ---- Sketch generation (Plan→Confirm→Execute) ----
 
   async function handleGenerateSketch(rawText: string) {
-    // If sketch already exists on canvas, route to multimodal edit (accumulation)
     if (sketchMode !== null) {
       const zone = extractSpatialZone(rawText)
       const zoneNames: Record<string, string> = {
@@ -288,7 +284,6 @@ function App() {
       return
     }
 
-    // No existing sketch: Plan→Confirm→Execute
     setIsGeneratingSketch(true)
     setFeedbackMessage('正在生成绘图计划...')
 
@@ -296,7 +291,12 @@ function App() {
       const res = await fetch('/api/sketch-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText }),
+        body: JSON.stringify({
+          text: rawText,
+          mode: activeMode,
+          promptHint: currentPreset.promptHint,
+          planFocus: currentPreset.planFocus,
+        }),
       })
       const data = await res.json()
 
@@ -345,7 +345,13 @@ function App() {
       const res = await fetch('/api/sketch-plan/revise', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: currentPlan, revision }),
+        body: JSON.stringify({
+          plan: currentPlan,
+          revision,
+          mode: activeMode,
+          promptHint: currentPreset.promptHint,
+          planFocus: currentPreset.planFocus,
+        }),
       })
       const data = await res.json()
 
@@ -392,7 +398,13 @@ function App() {
       const res = await fetch('/api/sketch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: plan.originalText, zone, approvedPlan: plan }),
+        body: JSON.stringify({
+          text: plan.originalText,
+          zone,
+          approvedPlan: plan,
+          mode: activeMode,
+          promptHint: currentPreset.promptHint,
+        }),
       })
       const data = await res.json()
 
@@ -463,6 +475,8 @@ function App() {
           previousConcept: sketchMode.concept,
           zone,
           accumulate,
+          mode: activeMode,
+          promptHint: currentPreset.promptHint,
         }),
       })
       const data = await res.json()
@@ -472,7 +486,6 @@ function App() {
         if (parsed && parsed.strokes.length > 0) {
           const rendered = fitAndRenderStrokes(parsed.strokes)
           if (accumulate) {
-            // Append new strokes to existing ones
             setSketchStrokes((prev) => [...prev, ...rendered])
           } else {
             setSketchStrokes(rendered)
@@ -555,14 +568,12 @@ function App() {
       setFeedbackMessage('思考中...')
 
       routeCommands(transcript).then((actions) => {
-        // Intercept generate_sketch — the unified drawing pipeline
         const sketchAction = actions.find((a) => a.type === 'generate_sketch')
         if (sketchAction) {
           handleGenerateSketch(transcript)
           return
         }
 
-        // Batch execution with dual-layer clear/undo
         if (actions.length > 1) {
           handleBatchActions(actions, transcript)
           return
@@ -572,14 +583,12 @@ function App() {
       })
 
       function handleBatchActions(actions: DrawingAction[], rawText: string) {
-        // Filter sketch actions
         const sketchActs = actions.filter((a) => a.type === 'generate_sketch')
         if (sketchActs.length > 0) {
           handleGenerateSketch(rawText)
           return
         }
 
-        // A4: Conditional multi-object distribution
         const addShapes = actions.filter((a) => a.type === 'add_shape' && a.shape)
         if (addShapes.length > 1) {
           const rawShapes = addShapes.map((a) => (a as DrawingAction & { shape: Shape }).shape)
@@ -641,7 +650,6 @@ function App() {
         }
 
         const message = getActionFeedback(action)
-        // A2: Avoid overlap for add_shape from non-dev sources
         if (action.type === 'add_shape' && action.shape && action.parseSource !== 'dev') {
           const adjusted: DrawingAction = { ...action, shape: avoidOverlap(action.shape, state.shapes) }
           dispatch(adjusted)
@@ -656,7 +664,6 @@ function App() {
         })
       }
 
-      /** Apply action with dual-layer clear/undo. Returns true if handled here. */
       function applyActionWithDualLayer(action: DrawingAction): boolean {
         if (action.type === 'generate_sketch') {
           handleGenerateSketch(action.rawText)
@@ -668,11 +675,10 @@ function App() {
           setSketchStrokes([])
           setSketchMode(null)
           setPendingPlan(null)
-          return false // let caller handle feedback
+          return false
         }
 
         if (action.type === 'undo') {
-          // Sketch layer takes priority
           if (sketchStrokes.length > 0) {
             setSketchStrokes([])
             setSketchMode(null)
@@ -694,62 +700,69 @@ function App() {
     },
   })
 
+  // ---- Render ----
+
+  const showConfig = activePage === CONFIG_MODE
+
   return (
-    <main className="app-shell" aria-label="Say2Draw application scaffold">
-      <header className="status-bar">
-        <div>
-          <p className="eyebrow">Say2Draw</p>
-          <h1>以声绘色</h1>
-        </div>
-        <div className="status-pill" aria-label={`Voice status: ${speech.status}`}>
-          <span className={`status-dot ${speech.status}`} aria-hidden="true" />
-          <span>{speech.status}</span>
-        </div>
-      </header>
+    <div className="app-shell" aria-label="Say2Draw application scaffold">
+      <SidebarNav
+        activePage={activePage}
+        onNavigate={setActivePage}
+        voiceStatus={speech.status}
+        llmStatus={llmStatus}
+      />
 
-      <section className="workspace" aria-label="Voice drawing workspace">
-        <VoicePanel
-          status={speech.status}
-          interimTranscript={speech.interimTranscript}
-          finalTranscript={speech.finalTranscript}
-          errorMessage={speech.errorMessage}
-          isSupported={speech.isSupported}
-          commandExamples={commandExamples}
-          systemCommands={systemCommands}
-          onPauseListening={speech.pauseListening}
-          onResumeListening={speech.resumeListening}
-          feedbackMessage={feedbackMessage}
-          isFeedbackSpeaking={speechFeedback.isSpeaking}
-          isFeedbackVoiceSupported={speechFeedback.isSupported}
-          llmStatus={llmStatus}
-        />
+      <main className="app-main">
+        {showConfig ? (
+          <ConfigPage llmStatus={llmStatus} />
+        ) : (
+          <div className="drawing-workspace">
+            <div className="drawing-header">
+              <div className="drawing-mode-title">
+                <span className="drawing-mode-icon">{currentPreset.icon}</span>
+                <h2>{currentPreset.label}</h2>
+              </div>
+              <VoiceStatusBar
+                status={speech.status}
+                interimTranscript={speech.interimTranscript}
+                finalTranscript={speech.finalTranscript}
+                errorMessage={speech.errorMessage}
+                isSupported={speech.isSupported}
+                onPauseListening={speech.pauseListening}
+                onResumeListening={speech.resumeListening}
+                feedbackMessage={feedbackMessage}
+                isFeedbackSpeaking={speechFeedback.isSpeaking}
+              />
+            </div>
 
-        <section className="canvas-area" aria-label="Canvas board">
-          <div className="canvas-stage" style={{ position: 'relative' }}>
-            <CanvasBoard
-              ref={canvasRef}
-              shapes={state.shapes}
-              hasOverlayContent={sketchStrokes.length > 0}
-            />
-            <SketchLayer
-              strokes={sketchStrokes}
-              width={CANVAS_WIDTH}
-              height={CANVAS_HEIGHT}
-            />
+            <section className="canvas-area" aria-label="Canvas board">
+              <div className="canvas-stage" style={{ position: 'relative' }}>
+                <CanvasBoard
+                  ref={canvasRef}
+                  shapes={state.shapes}
+                  hasOverlayContent={sketchStrokes.length > 0}
+                />
+                <SketchLayer
+                  strokes={sketchStrokes}
+                  width={CANVAS_WIDTH}
+                  height={CANVAS_HEIGHT}
+                />
+              </div>
+            </section>
           </div>
-        </section>
+        )}
 
-        <aside className="history-panel" aria-label="Command history">
+        <aside className="context-panel" aria-label="Context panel">
           <PlanCompanion plan={pendingPlan} />
-
+          <ModePresetPanel mode={activeMode} />
           <div className="panel-heading">
             <h2>Command History</h2>
           </div>
-
           <CommandHistory records={state.history} />
         </aside>
-      </section>
-    </main>
+      </main>
+    </div>
   )
 }
 

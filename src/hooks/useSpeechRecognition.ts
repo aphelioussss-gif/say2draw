@@ -21,7 +21,7 @@ type SpeechRecognitionResult = {
   finalTranscript: string
   errorMessage: string
   isSupported: boolean
-  pauseListening: () => void
+  pauseListening: (options?: { manual?: boolean }) => void
   resumeListening: () => void
   isManuallyPaused: boolean
   /** Ref for accessing latest isManuallyPaused in async callbacks */
@@ -111,10 +111,11 @@ export function useSpeechRecognition({
     shouldIgnoreResultRef.current = shouldIgnoreResult
   }, [shouldIgnoreResult])
 
-  function pauseListening() {
+  function pauseListening(options: { manual?: boolean } = {}) {
+    const manual = options.manual !== false
     shouldListenRef.current = false
-    isManuallyPausedRef.current = true
-    setIsManuallyPaused(true)
+    isManuallyPausedRef.current = manual
+    setIsManuallyPaused(manual)
     setInterimTranscript('')
     speechBufferRef.current = ''
     if (silenceTimerRef.current) {

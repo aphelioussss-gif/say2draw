@@ -40,7 +40,11 @@ function getOpenAIClient(): OpenAI | null {
 
 const GRID_RES = 50
 
-const SKETCH_SYSTEM_PROMPT = `You are an expert sketch artist specializing in minimal hand-drawn line art. Your sketches are clean, readable, and communication-focused — like whiteboard drawings or notebook doodles, not fine art.
+// ============================================================
+// Scene-aware sketch prompts: common base + 4 scene deltas
+// ============================================================
+
+const SKETCH_BASE_PROMPT = `You are an expert sketch artist specializing in minimal hand-drawn line art. Your sketches are clean, readable, and communication-focused — like whiteboard drawings or notebook doodles.
 
 You draw on a numbered grid: 1 to ${GRID_RES} along the bottom (x) and 1 to ${GRID_RES} along the left (y). Bottom-left is 'x1y1', top-right is 'x${GRID_RES}y${GRID_RES}'.
 
@@ -81,26 +85,28 @@ Straight line:
 Points = ['x18y31', 'x35y14']
 t_values = [0.00, 1.00]
 
-=== Style rules ===
+=== Core style rules ===
 - Clean, minimal line art. No shading, no fill, no textures.
 - Clear outlines with the fewest strokes needed for recognition.
-- Whiteboard / notebook style: slight natural irregularity, but intentionally readable.
+- Slight natural irregularity, but intentionally readable.
 - Do NOT add random wobbles, decorative strokes, or overly long stray lines.
 - Long strokes should be split into connected shorter segments.
-- Text/characters: short connected handwriting strokes.
-
-=== Composition ===
-- Place objects in the zone requested by the user. Default to center if no zone specified.
-- Keep objects inside x8..x42 and y8..y42.
-- Use 4-20 strokes per object. Simple objects use fewer; complex objects use more.
-- Draw main body first, then attached details (ears, legs, tail, face).
+- Draw main body first, then attached details.
 - Larger elements first, smaller details second.
 - Leave breathing room between elements.
+
+=== Abstract input translation ===
+If the user's input does NOT directly describe drawable objects (e.g. emotions, moods, abstract concepts, states of being), you MUST first translate it into a concrete visual scene, then draw that scene.
+Steps:
+1. Identify the core feeling or concept the user is expressing.
+2. Choose a visual metaphor that conveys this concept (a scene, composition, or symbolic arrangement).
+3. Decide on the key elements and their positions.
+4. Explain your translation in <thinking>, then draw normally.
 
 === Output format ===
 Output ONLY in XML. NO markdown fences.
 
-<thinking>Brief drawing strategy: parts, order, placement, colors.</thinking>
+<thinking>Drawing strategy: how you interpreted the input, parts, order, placement, colors.</thinking>
 <strokes>
   <s1>
     <points>'x...y...', ...</points>
@@ -109,6 +115,66 @@ Output ONLY in XML. NO markdown fences.
     <color>#ef4444</color>  <!-- optional, omit for black -->
   </s1>
 </strokes>`
+
+const SCENE_DELTAS: Record<string, string> = {
+  quick_sketch: `
+=== Scene: Quick Sketch ===
+You are drawing a quick, spontaneous sketch. Your goal is speed and recognition, not completeness.
+- Use 4-10 strokes total. Be concise.
+- Focus on the single most recognizable silhouette or shape.
+- Leave generous empty space around the subject.
+- Skip small decorative details — only draw what makes the subject identifiable.
+- A loose, confident single-pass look is better than an overworked drawing.`,
+
+  whiteboard: `
+=== Scene: Whiteboard / Flow ===
+You are drawing a structured whiteboard diagram. Your goal is information clarity, not illustration.
+
+For ANY request containing 流程图 / flow / process / from A to B:
+- Draw a real flowchart, never a metaphor or single symbol.
+- Use 2-6 rounded rectangles as process nodes.
+- Place nodes left-to-right for linear flows, or top-to-bottom only if the user asks for vertical layout.
+- Connect every adjacent node with a clean arrow line and an arrowhead pointing to the next step.
+- Put a short readable label inside each node using <label>...</label> and <label_point>x..y..</label>.
+- Use labels such as 登录, 选择商品, 支付, 支付成功, 完成. Keep each label under 6 Chinese characters.
+- If the user says "从 A 到 B", the first node must be A and the last node must be B.
+- Do NOT draw a large circle, random loop, person, decorative icon, or abstract doodle.
+- The drawing should be understandable as a flowchart before reading the command history.
+
+XML label example:
+<s1>
+  <points>'x5y28', 'x15y28', 'x15y28', 'x15y20', 'x15y20', 'x5y20', 'x5y20', 'x5y28'</points>
+  <t_values>0.00,0.15,0.25,0.40,0.50,0.65,0.75,1.00</t_values>
+  <id>login process box</id>
+  <label>登录</label>
+  <label_point>x10y24</label_point>
+</s1>
+
+Each element should have a clear purpose in the diagram.`,
+
+  story_scene: `
+=== Scene: Story Scene ===
+You are illustrating a narrative moment or emotional scene. Your goal is atmosphere and storytelling.
+- Compose multiple elements into a coherent scene with a clear focal point.
+- Use scale, position, and relative size to convey meaning and mood.
+- Character posture and spatial relationships matter more than object precision.
+- The abstract input translation rules are especially important here: turn feelings into visual scenes.
+- A recognizable scene with emotional weight beats a technically perfect but empty drawing.`,
+
+  teaching_diagram: `
+=== Scene: Teaching Diagram ===
+You are drawing an educational diagram. Your goal is to help someone understand a concept.
+- Build the drawing in logical layers: main structure first, then labels and annotations.
+- Show relationships between parts clearly.
+- Use arrows or connecting lines to indicate processes or dependencies.
+- Small text labels (short handwriting strokes) help but do not over-label.
+- The drawing should guide someone through the concept step by step.`,
+}
+
+function buildSketchSystemPrompt(sceneType: string): string {
+  const delta = SCENE_DELTAS[sceneType] || SCENE_DELTAS.quick_sketch
+  return SKETCH_BASE_PROMPT + delta
+}
 
 const SKETCH_HOUSE_EXAMPLE = `<example>
 <concept>House</concept>
@@ -217,56 +283,104 @@ const SKETCH_CAT_EXAMPLE = `<example>
 </strokes>
 </example>`
 
-const SKETCH_PLAN_PROMPT = `You are a drawing planner for a voice-controlled sketch tool. Your job is to analyze what the user wants to draw and produce a structured plan BEFORE any drawing happens.
+const SKETCH_PLAN_PROMPT = `You are a drawing planner for a voice-controlled sketch tool. Your job is to understand what the user wants to draw, choose the right diagram type, and produce a natural plan.
 
 The tool draws minimal hand-drawn line art using only six colors: black (#111827), red (#ef4444), blue (#3b82f6), green (#22c55e), yellow (#eab308), white (#f9fafb).
 
-Given the user's spoken command, output a JSON plan:
-{
-  "sceneType": "quick_sketch" | "whiteboard" | "story_scene" | "teaching_diagram",
-  "previewText": "short Chinese sentence describing what will be drawn",
-  "layoutBrief": "Chinese composition brief with positions, scale, spacing, and relationship between elements",
-  "styleBrief": "Chinese visual style brief for recognizable minimal line art",
-  "elements": [{
-    "name": "Chinese name of the element",
-    "position": "Chinese position description (中间/左上角/右边/下面 etc.)",
-    "color": "#111827" | "#ef4444" | "#3b82f6" | "#22c55e" | "#eab308" | "#f9fafb",
-    "role": "main" | "supporting" | "label",
-    "details": ["2-4 concrete drawable details, e.g. 弯月弧线, 长头发, 裙摆, 星星"]
-  }],
-  "drawingOrder": ["element names in order"],
-  "detailChecklist": ["3-6 concrete details that must appear in the sketch"],
-  "avoid": ["2-4 mistakes to avoid"],
-  "polishHints": ["3-5 natural Chinese refinement commands the user can say after drawing"]
-}
+=== Stage 1: Identify intent ===
+Decide what kind of drawing the user needs:
+- single_subject: one object (cat, house, sun, moon, car, person).
+- flowchart: process steps connected by arrows (login→pay, A→B→C).
+- funnel: stages that narrow down (user growth, sales pipeline, conversion).
+- architecture: system modules with connections (microservices, platform diagram).
+- story_scene: narrative or emotional scenes. Use for abstract inputs too (emotions, moods).
+- teaching_diagram: educational layered explanation (photosynthesis, water cycle).
+- free_sketch: the user just wants to see something drawn, no diagram structure needed.
+
+=== Stage 2: Build the plan ===
+Output a JSON plan matching the intent type.
+
+Common fields:
+- intentType: one of the 7 types above.
+- compositionRationale: one Chinese sentence explaining why you chose this structure. Not a long reasoning chain — just the design rationale a user would find helpful (e.g. "先从认知到转化三层说明用户怎么变少", not "经过分析用户输入判断为漏斗图").
+- previewText: short Chinese sentence under 30 chars.
+- sceneType: map intentType to one of: quick_sketch | whiteboard | story_scene | teaching_diagram.
+
+Element rules by intentType:
+
+single_subject:
+  "elements": [{"name": "...", "position": "...", "color": "...", "role": "main", "details": ["2-4 concrete drawable features"]}]
+  1 element is fine. Do not force 3 elements for a single object.
+
+flowchart:
+  "elements": [{"name": "concrete step", "position": "...", "color": "...", "role": "main"}]
+  "connections": [{"from": "step A", "to": "step B", "direction": "→" | "↓" | "↘"}]
+  CRITICAL: Never collapse the user's entire sentence into one node. Always decompose into 3-6 specific step nodes.
+  Each node must represent one concrete action or state. Each connection has direction.
+  Decomposition method (do NOT copy node names verbatim—infer from the user's domain):
+  - "从登录到支付" → 登录, 验证身份, 选择商品, 提交订单, 支付, 支付成功
+  - "用户注册流程" → 填写信息, 邮箱验证, 设置密码, 注册完成
+
+funnel:
+  "elements": [{"name": "meaningful stage name e.g. 认知/激活/转化/留存", "position": "top→bottom", "color": "...", "role": "main"}]
+  Stages must convey the funnel idea — not "阶段1/2/3".
+  If the user said "三阶段", keep 3. Otherwise judge the right number.
+  "connections": [{"from": "top stage", "to": "next stage", "direction": "↓"}]
+
+architecture:
+  "elements": [{"name": "module name", "position": "...", "color": "...", "role": "main" | "supporting"}]
+  Distinguish: entry (网关/前端), services (业务模块), storage (数据库/缓存), messaging (消息队列).
+  "connections": [{"from": "caller", "to": "callee", "direction": "→"}]
+
+story_scene / teaching_diagram:
+  Use the existing elements format. Add connections only if a spatial or logical flow exists.
 
 Rules:
-- Default color is black (#111827). Only use other colors when the user explicitly mentions them.
-- If the user says an unsupported color (e.g., purple, orange), map it to the nearest palette color.
-- Do not make a shallow plan. Split scenes into multiple drawable elements.
-- Include concrete visible details that help the sketch stay recognizable.
-- Keep previewText concise (one sentence, under 30 Chinese characters).
+- Default color is black (#111827).
+- Keep previewText concise (under 30 Chinese characters).
 - Output ONLY the JSON object. No markdown fences. No extra text.`
 
+type PlanElement = {
+  name: string
+  position: string
+  color: string
+  role: 'main' | 'supporting' | 'label'
+  details: string[]
+}
+
+type PlanConnection = {
+  from: string
+  to: string
+  direction: string
+}
+
 type SketchPlan = {
+  intentType: string
+  compositionRationale: string
   sceneType: 'quick_sketch' | 'whiteboard' | 'story_scene' | 'teaching_diagram'
   previewText: string
-  layoutBrief: string
-  styleBrief: string
-  elements: Array<{
-    name: string
-    position: string
-    color: string
-    role: 'main' | 'supporting' | 'label'
-    details: string[]
-  }>
+  elements: PlanElement[]
+  connections?: PlanConnection[]
   drawingOrder: string[]
-  detailChecklist: string[]
-  avoid: string[]
-  polishHints: string[]
 }
 
 const PLAN_COLORS = new Set(['#111827', '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#f9fafb'])
+const SKETCH_REQUEST_TIMEOUT_MS = 20000
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+    promise
+      .then((value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      })
+      .catch((error) => {
+        clearTimeout(timeout)
+        reject(error)
+      })
+  })
+}
 
 function extractJsonObjects(text: string): string[] {
   const candidates: string[] = []
@@ -321,7 +435,7 @@ function normalizePlan(value: unknown, originalText: string): SketchPlan | null 
 
   const data = value as Record<string, unknown>
   const rawElements = Array.isArray(data.elements) ? data.elements : []
-  const elements = rawElements
+  const elements: PlanElement[] = rawElements
     .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
     .map((item, index) => {
       const color = typeof item.color === 'string' && PLAN_COLORS.has(item.color)
@@ -345,35 +459,100 @@ function normalizePlan(value: unknown, originalText: string): SketchPlan | null 
         position: '中间',
         color: '#111827',
         role: 'main' as const,
-        details: ['清晰轮廓', '关键特征'],
+        details: inferDefaultDetails(originalText),
       }]
 
-  const sceneTypes = new Set(['quick_sketch', 'whiteboard', 'story_scene', 'teaching_diagram'])
-  const sceneType = typeof data.sceneType === 'string' && sceneTypes.has(data.sceneType)
-    ? data.sceneType as SketchPlan['sceneType']
-    : inferSceneType(originalText)
+  const validIntentTypes = new Set(['single_subject', 'flowchart', 'funnel', 'architecture', 'story_scene', 'teaching_diagram', 'free_sketch'])
+  const intentType = typeof data.intentType === 'string' && validIntentTypes.has(data.intentType)
+    ? data.intentType
+    : inferIntentType(originalText, safeElements)
+
+  const sceneType = inferSceneTypeFromIntent(intentType)
+
+  const structuredElements = intentType === 'funnel'
+    ? normalizeFunnelElements(safeElements, originalText)
+    : intentType === 'flowchart'
+    ? normalizeFlowchartElements(safeElements, originalText)
+    : safeElements
+
+  const rawConnections = Array.isArray(data.connections) ? data.connections : []
+  const connections: PlanConnection[] | undefined = rawConnections.length > 0
+    ? rawConnections
+        .filter((conn): conn is Record<string, unknown> => !!conn && typeof conn === 'object')
+        .map((conn) => ({
+          from: typeof conn.from === 'string' ? conn.from : '',
+          to: typeof conn.to === 'string' ? conn.to : '',
+          direction: typeof conn.direction === 'string' ? conn.direction : '→',
+        }))
+        .filter((conn) => conn.from && conn.to)
+    : undefined
 
   return {
+    intentType,
+    compositionRationale: typeof data.compositionRationale === 'string' && data.compositionRationale.trim()
+      ? data.compositionRationale.trim()
+      : buildFallbackRationale(intentType, structuredElements, originalText),
     sceneType,
     previewText: typeof data.previewText === 'string' && data.previewText.trim()
       ? data.previewText.trim().slice(0, 40)
       : buildFallbackPreview(originalText),
-    layoutBrief: typeof data.layoutBrief === 'string' && data.layoutBrief.trim()
-      ? data.layoutBrief.trim()
-      : buildFallbackLayoutBrief(safeElements),
-    styleBrief: typeof data.styleBrief === 'string' && data.styleBrief.trim()
-      ? data.styleBrief.trim()
-      : '用干净的手绘线条表达主体，减少无意义笔画，保证每个元素可辨认。',
-    elements: safeElements,
-    drawingOrder: Array.isArray(data.drawingOrder) && data.drawingOrder.every((item) => typeof item === 'string')
+    elements: structuredElements,
+    connections: intentType === 'funnel'
+      ? buildSequentialConnections(structuredElements, '↓')
+      : intentType === 'flowchart'
+      ? buildSequentialConnections(structuredElements, '→')
+      : connections && connections.length > 0 ? connections : undefined,
+    drawingOrder: intentType !== 'funnel' && intentType !== 'flowchart' && Array.isArray(data.drawingOrder) && data.drawingOrder.every((item) => typeof item === 'string')
       ? data.drawingOrder as string[]
-      : safeElements.map((item) => item.name),
-    detailChecklist: normalizeStringArray(data.detailChecklist, safeElements.flatMap((item) => item.details).slice(0, 6)),
-    avoid: normalizeStringArray(data.avoid, ['不要把所有元素堆在一起', '不要省略主体的关键特征']),
-    polishHints: Array.isArray(data.polishHints) && data.polishHints.every((item) => typeof item === 'string')
-      ? (data.polishHints as string[]).slice(0, 5)
-      : buildFallbackPolishHints(originalText),
+      : structuredElements.map((item) => item.name),
   }
+}
+
+function buildSequentialConnections(elements: PlanElement[], direction: string): PlanConnection[] | undefined {
+  if (elements.length < 2) return undefined
+  return elements.slice(0, -1).map((element, index) => ({
+    from: element.name,
+    to: elements[index + 1].name,
+    direction,
+  }))
+}
+
+function normalizeFunnelElements(elements: PlanElement[], text: string): PlanElement[] {
+  const stageNames = inferFunnelStages(text, elements)
+  const colors = ['#3b82f6', '#22c55e', '#eab308', '#ef4444']
+
+  return stageNames.map((name, index) => ({
+    name,
+    position: ['上层', '中层', '下层', '底层'][index] || `第${index + 1}层`,
+    color: colors[index % colors.length],
+    role: 'main',
+    details: [
+      index === 0 ? '最宽的入口层' : index === stageNames.length - 1 ? '最窄的结果层' : '逐步收窄的中间层',
+      '梯形分层',
+      '阶段文字居中',
+    ],
+  }))
+}
+
+function inferFunnelStages(text: string, elements: PlanElement[]): string[] {
+  const usablePlanStages = elements
+    .map((element) => element.name.trim())
+    .filter((name) => name && !/阶段|漏斗|三阶段|用户增长/.test(name))
+
+  const requestedCount = /三|3/.test(text)
+    ? 3
+    : /四|4/.test(text)
+      ? 4
+      : Math.max(usablePlanStages.length, 3)
+
+  if (usablePlanStages.length >= requestedCount) {
+    return usablePlanStages.slice(0, requestedCount)
+  }
+
+  if (/用户增长|增长/.test(text)) return ['获客', '激活', '留存'].slice(0, requestedCount)
+  if (/销售|线索|成交/.test(text)) return ['线索', '沟通', '成交'].slice(0, requestedCount)
+  if (/转化|购买|支付/.test(text)) return ['曝光', '点击', '转化'].slice(0, requestedCount)
+  return ['认知', '兴趣', '转化', '留存'].slice(0, requestedCount)
 }
 
 function normalizeStringArray(value: unknown, fallback: string[]): string[] {
@@ -382,6 +561,93 @@ function normalizeStringArray(value: unknown, fallback: string[]): string[] {
     .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     .map((item) => item.trim())
   return items.length > 0 ? items : fallback
+}
+
+function shouldUsePlannerThinking(text: string, mode?: string): boolean {
+  if (mode === 'whiteboard_flow') return true
+  if (/流程|从.*到|漏斗|架构|微服务|模块|系统/.test(text)) return true
+  return false
+}
+
+function isThinkingParamError(error: unknown): boolean {
+  const msg = String(error)
+  const status = (error as Record<string, unknown> | undefined)?.status
+  if (status === 400 || status === 422) {
+    return /thinking|extra_body|invalid parameter|unrecognized/i.test(msg)
+  }
+  return false
+}
+
+function normalizeFlowchartElements(elements: PlanElement[], text: string): PlanElement[] {
+  const cleanedText = text.replace(/^(请)?画(一个|一张|一幅)?/, '').replace(/的?流程图?/g, '').trim()
+
+  const badPatterns = /^(请)?画|的?流程图?|^元素\d+$/
+  const validElements = elements.filter(
+    (e) => !badPatterns.test(e.name) && e.name !== text && e.name !== cleanedText,
+  )
+
+  // Already sufficient
+  if (validElements.length >= 3) return validElements
+
+  const nodes = inferFlowchartNodes(text, cleanedText, validElements)
+
+  return nodes.map((name, i) => ({
+    name,
+    position: i === 0 ? '左侧' : i === nodes.length - 1 ? '右侧' : '中间',
+    color: '#111827',
+    role: 'main' as const,
+    details: ['节点方框', '方向箭头', '步骤文字'],
+  }))
+}
+
+function inferFlowchartNodes(
+  text: string,
+  cleanedText: string,
+  existing: PlanElement[],
+): string[] {
+  // Existing elements with usable names (at least 2)
+  const existingNames = existing.map((e) => e.name.trim()).filter((n) => n && n !== text && n !== cleanedText)
+  if (existingNames.length >= 3) return existingNames
+
+  // E-commerce / payment domain defaults
+  const isPayment = /支付|付款|购买|下单|电商|购物|结算/.test(text)
+  const isRegister = /注册/.test(text)
+
+  // Pattern: "从A到B"
+  const fromTo = text.match(/从(.+?)到(.+?)(?:的?流程)?$/)
+  if (fromTo) {
+    const from = fromTo[1].trim()
+    const to = fromTo[2].trim()
+    if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
+    if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
+    if (existingNames.length >= 2) return existingNames
+    return [from, '处理中', to]
+  }
+
+  // Pattern: "A到B" (loose)
+  const looseFromTo = text.match(/(.+?)到(.+)/)
+  if (looseFromTo) {
+    const from = looseFromTo[1].trim()
+    const to = looseFromTo[2].trim()
+    if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
+    if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
+    if (existingNames.length >= 2) return existingNames
+    return [from, '处理中', to]
+  }
+
+  // Partial existing elements — pad with domain defaults
+  if (isPayment && existingNames.length >= 2) {
+    // Existing names are likely a subset (e.g. ['登录', '支付']); return full domain chain.
+    return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
+  }
+
+  // Domain-specific fallbacks
+  if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
+  if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
+
+  // Generic fallback
+  const label = cleanedText || '流程步骤'
+  return ['开始', label, '完成']
 }
 
 function parseSketchPlan(content: string, originalText: string): SketchPlan | null {
@@ -404,11 +670,45 @@ function parseSketchPlan(content: string, originalText: string): SketchPlan | nu
   }
 }
 
-function inferSceneType(text: string): SketchPlan['sceneType'] {
-  if (/流程|步骤|箭头|关系|图/.test(text)) return 'whiteboard'
-  if (/绕|表示|解释|讲解|课堂/.test(text)) return 'teaching_diagram'
-  if (/站|坐|下面|旁边|故事|场景/.test(text)) return 'story_scene'
+function inferIntentType(text: string, elements: PlanElement[]): string {
+  if (/流程|步骤|从.*到|登录|支付|下单|确认/.test(text)) return 'flowchart'
+  if (/漏斗|转化|增长|留存|激活|认知|阶段.*层/.test(text)) return 'funnel'
+  if (/架构|微服务|系统|模块|网关|服务.*调用|数据库|消息/.test(text)) return 'architecture'
+  if (/讲解|解释|课堂|光合|循环|过程|原理/.test(text)) return 'teaching_diagram'
+  if (/故事|场景|情感|困境|情绪|氛围|站.*下|旁边/.test(text)) return 'story_scene'
+  // Single subject if only 1 element with role=main
+  const mainElements = elements.filter((e) => e.role === 'main')
+  if (mainElements.length === 1 && elements.length === 1) return 'single_subject'
+  if (mainElements.length === 0 && elements.length === 1) return 'single_subject'
+  return 'free_sketch'
+}
+
+function inferSceneTypeFromIntent(intentType: string): SketchPlan['sceneType'] {
+  if (intentType === 'flowchart' || intentType === 'funnel' || intentType === 'architecture') return 'whiteboard'
+  if (intentType === 'teaching_diagram') return 'teaching_diagram'
+  if (intentType === 'story_scene') return 'story_scene'
   return 'quick_sketch'
+}
+
+function inferDefaultDetails(text: string): string[] {
+  // Semantic fallback instead of generic "清晰轮廓 / 关键特征"
+  if (/流程|步骤|从.*到/.test(text)) return ['节点方框', '方向箭头', '步骤文字']
+  if (/漏斗|转化|增长/.test(text)) return ['逐层收窄的梯形', '阶段名称', '方向箭头']
+  if (/架构|微服务|系统|模块/.test(text)) return ['模块方框', '连接线', '模块名称']
+  if (/猫/.test(text)) return ['圆形猫头', '三角耳朵', '胡须']
+  if (/太阳/.test(text)) return ['圆形太阳', '短射线']
+  if (/月亮/.test(text)) return ['弯月外弧', '弯月内弧']
+  if (/树/.test(text)) return ['树干', '树冠']
+  if (/女孩|人物|人/.test(text)) return ['圆形头部', '身体轮廓']
+  return ['主体轮廓', '可辨认的关键特征']
+}
+
+function buildFallbackRationale(intentType: string, elements: PlanElement[]): string {
+  const elementNames = elements.map((e) => e.name).join('、')
+  if (intentType === 'flowchart') return `按${elementNames}的先后顺序展示流程`
+  if (intentType === 'funnel') return `从${elementNames}逐步收窄说明${elements.length}个阶段`
+  if (intentType === 'architecture') return `${elementNames}之间的调用和数据流关系`
+  return `展示${elementNames}的整体结构`
 }
 
 function buildFallbackPreview(text: string): string {
@@ -416,43 +716,31 @@ function buildFallbackPreview(text: string): string {
   return `将绘制${subject}`.slice(0, 40)
 }
 
-function buildFallbackLayoutBrief(elements: SketchPlan['elements']): string {
-  return elements
-    .map((element) => `${element.name}放在${element.position}`)
-    .join('，') || '主体放在画布中间，保持元素之间有留白。'
-}
-
-function buildFallbackPolishHints(text: string): string[] {
-  if (/月亮|女孩/.test(text)) {
-    return ['月亮更弯一点', '给女孩加头发', '加两颗星星', '女孩小一点']
-  }
-  if (/流程|步骤/.test(text)) {
-    return ['箭头更明显', '节点分开一点', '加上文字标签']
-  }
-  if (/太阳|树/.test(text)) {
-    return ['太阳放右上角', '树大一点', '加一条地平线']
-  }
-  return ['轮廓更清楚', '加一点细节', '主体放大一点']
-}
-
 function createFallbackPlan(text: string): SketchPlan {
   const subject = text.replace(/^(请)?画(一个|一只|一幅|一下)?/, '').trim() || text
   const elements = inferFallbackElements(text, subject)
+  const intentType = inferIntentType(text, elements)
   return {
-    sceneType: inferSceneType(text),
+    intentType,
+    compositionRationale: buildFallbackRationale(intentType, elements),
+    sceneType: inferSceneTypeFromIntent(intentType),
     previewText: buildFallbackPreview(text),
-    layoutBrief: buildFallbackLayoutBrief(elements),
-    styleBrief: '用极简手绘线条，先画主体轮廓，再补关键细节。',
     elements,
+    connections: intentType === 'funnel' ? buildSequentialConnections(elements, '↓') : undefined,
     drawingOrder: elements.map((element) => element.name),
-    detailChecklist: elements.flatMap((element) => element.details).slice(0, 6),
-    avoid: ['不要只画抽象符号', '不要把元素挤在同一个位置'],
-    polishHints: buildFallbackPolishHints(text),
   }
 }
 
 function inferFallbackElements(text: string, subject: string): SketchPlan['elements'] {
   const elements: SketchPlan['elements'] = []
+
+  if (/漏斗|转化|增长/.test(text)) {
+    return normalizeFunnelElements([], text)
+  }
+
+  if (/流程|步骤|从.*到|登录|支付|下单|确认/.test(text)) {
+    return normalizeFlowchartElements([], text)
+  }
 
   if (/月亮/.test(text)) {
     elements.push({
@@ -496,13 +784,384 @@ function inferFallbackElements(text: string, subject: string): SketchPlan['eleme
 
   if (elements.length > 0) return elements
 
+  // If whiteboard-like intent but can't parse, ask for clarification instead of faking
+  if (/流程|架构|漏斗|图|模块|系统/.test(text)) {
+    return [{
+      name: subject,
+      position: '中间',
+      color: '#111827',
+      role: 'main',
+      details: ['请提供更具体的模块或步骤名称'],
+    }]
+  }
+
   return [{
     name: subject,
     position: /下面|下方/.test(text) ? '下方' : '中间',
     color: '#111827',
     role: 'main',
-    details: ['清晰轮廓', '关键特征'],
+    details: inferDefaultDetails(text),
   }]
+}
+
+type FallbackSketchStroke = {
+  id: string
+  points: Array<[number, number]>
+  color?: string
+  label?: string
+  labelPoint?: [number, number]
+}
+
+function clampGrid(value: number): number {
+  return Math.max(1, Math.min(GRID_RES, Math.round(value)))
+}
+
+function coord(x: number, y: number): string {
+  return `x${clampGrid(x)}y${clampGrid(y)}`
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function strokeToXml(stroke: FallbackSketchStroke, index: number): string {
+  const points = stroke.points.map(([x, y]) => `'${coord(x, y)}'`).join(', ')
+  const tValues = stroke.points.map((_, pointIndex) => {
+    if (stroke.points.length === 1) return '0.00'
+    return (pointIndex / (stroke.points.length - 1)).toFixed(2)
+  }).join(', ')
+  const color = stroke.color && PLAN_COLORS.has(stroke.color)
+    ? `\n    <color>${stroke.color}</color>`
+    : ''
+  const label = stroke.label && stroke.labelPoint
+    ? `\n    <label>${escapeXml(stroke.label)}</label>\n    <label_point>${coord(stroke.labelPoint[0], stroke.labelPoint[1])}</label_point>`
+    : ''
+
+  return `  <s${index}>
+    <points>${points}</points>
+    <t_values>${tValues}</t_values>
+    <id>${escapeXml(stroke.id)}</id>${color}${label}
+  </s${index}>`
+}
+
+function positionCenter(position: string, name: string): [number, number] {
+  let x = 25
+  let y = 25
+
+  if (/左/.test(position)) x = 15
+  if (/右/.test(position)) x = 35
+  if (/上|高|月亮周围/.test(position)) y = 36
+  if (/下|低|脚下/.test(position)) y = 14
+
+  if (/月亮|太阳|星/.test(name) && !/下|低/.test(position)) y = Math.max(y, 36)
+  if (/女孩|人物|人/.test(name) && /月亮/.test(position)) y = 15
+  if (/影子/.test(name)) y = 9
+
+  return [x, y]
+}
+
+function buildMoonStrokes(cx: number, cy: number, color?: string): FallbackSketchStroke[] {
+  return [
+    {
+      id: 'crescent moon outer arc',
+      color,
+      points: [[cx - 7, cy + 4], [cx - 2, cy + 7], [cx + 5, cy + 4], [cx + 7, cy - 2], [cx + 2, cy - 7]],
+    },
+    {
+      id: 'crescent moon inner arc',
+      color,
+      points: [[cx - 2, cy + 4], [cx + 1, cy + 2], [cx + 2, cy - 2], [cx - 1, cy - 5]],
+    },
+  ]
+}
+
+function buildGirlStrokes(cx: number, cy: number, color?: string): FallbackSketchStroke[] {
+  return [
+    {
+      id: 'girl head circle',
+      color,
+      points: [[cx, cy + 9], [cx + 3, cy + 8], [cx + 4, cy + 5], [cx + 2, cy + 3], [cx - 2, cy + 3], [cx - 4, cy + 5], [cx - 3, cy + 8], [cx, cy + 9]],
+    },
+    {
+      id: 'girl hair outline',
+      color,
+      points: [[cx - 4, cy + 6], [cx - 2, cy + 10], [cx + 2, cy + 10], [cx + 4, cy + 6]],
+    },
+    {
+      id: 'girl dress triangle',
+      color,
+      points: [[cx, cy + 3], [cx - 5, cy - 5], [cx - 5, cy - 5], [cx + 5, cy - 5], [cx + 5, cy - 5], [cx, cy + 3]],
+    },
+    {
+      id: 'girl arms',
+      color,
+      points: [[cx - 3, cy], [cx - 8, cy - 2], [cx + 3, cy], [cx + 8, cy - 2]],
+    },
+    {
+      id: 'girl legs',
+      color,
+      points: [[cx - 2, cy - 5], [cx - 3, cy - 10], [cx + 2, cy - 5], [cx + 3, cy - 10]],
+    },
+  ]
+}
+
+function buildSunStrokes(cx: number, cy: number, color?: string): FallbackSketchStroke[] {
+  return [
+    {
+      id: 'sun circle',
+      color,
+      points: [[cx, cy + 4], [cx + 4, cy + 2], [cx + 4, cy - 2], [cx, cy - 4], [cx - 4, cy - 2], [cx - 4, cy + 2], [cx, cy + 4]],
+    },
+    {
+      id: 'sun rays',
+      color,
+      points: [[cx, cy + 7], [cx, cy + 10], [cx + 5, cy + 5], [cx + 8, cy + 8], [cx + 7, cy], [cx + 11, cy], [cx + 5, cy - 5], [cx + 8, cy - 8], [cx, cy - 7], [cx, cy - 10], [cx - 5, cy - 5], [cx - 8, cy - 8], [cx - 7, cy], [cx - 11, cy], [cx - 5, cy + 5], [cx - 8, cy + 8]],
+    },
+  ]
+}
+
+function buildTreeStrokes(cx: number, cy: number, color?: string): FallbackSketchStroke[] {
+  return [
+    {
+      id: 'tree trunk',
+      color,
+      points: [[cx - 2, cy - 8], [cx - 1, cy + 1], [cx + 1, cy + 1], [cx + 2, cy - 8]],
+    },
+    {
+      id: 'tree crown',
+      color,
+      points: [[cx, cy + 9], [cx + 6, cy + 6], [cx + 7, cy + 1], [cx + 3, cy - 2], [cx - 3, cy - 2], [cx - 7, cy + 1], [cx - 6, cy + 6], [cx, cy + 9]],
+    },
+    {
+      id: 'tree ground line',
+      color,
+      points: [[cx - 7, cy - 8], [cx + 7, cy - 8]],
+    },
+  ]
+}
+
+function buildStarStrokes(cx: number, cy: number, color?: string): FallbackSketchStroke[] {
+  return [
+    { id: 'small star one', color, points: [[cx, cy + 3], [cx + 1, cy + 1], [cx + 3, cy + 1], [cx + 1, cy - 1], [cx + 2, cy - 3], [cx, cy - 2], [cx - 2, cy - 3], [cx - 1, cy - 1], [cx - 3, cy + 1], [cx - 1, cy + 1], [cx, cy + 3]] },
+    { id: 'small star two', color, points: [[cx + 8, cy + 2], [cx + 10, cy], [cx + 8, cy - 2], [cx + 6, cy], [cx + 8, cy + 2]] },
+  ]
+}
+
+function buildGenericStrokes(cx: number, cy: number, name: string, color?: string): FallbackSketchStroke[] {
+  return [
+    {
+      id: `${name} main outline`,
+      color,
+      points: [[cx - 7, cy + 5], [cx - 2, cy + 8], [cx + 5, cy + 5], [cx + 7, cy], [cx + 4, cy - 6], [cx - 4, cy - 6], [cx - 7, cy], [cx - 7, cy + 5]],
+    },
+    {
+      id: `${name} inner detail`,
+      color,
+      points: [[cx - 3, cy + 1], [cx + 3, cy + 1], [cx - 2, cy - 2], [cx + 2, cy - 2]],
+    },
+  ]
+}
+
+function cleanFlowStep(value: string): string {
+  return value
+    .replace(/登陆/g, '登录')
+    .replace(/^(一个人|用户|从|到|去|进入|完成|画|一个|一张|一幅)/, '')
+    .replace(/(的)?流程图$/, '')
+    .replace(/[，。,.、\s]/g, '')
+    .trim()
+    .slice(0, 6)
+}
+
+function inferFlowSteps(text: string, plan: SketchPlan): string[] {
+  const fromToMatch = text.match(/从(.+?)到(.+?)(?:的|流程图|流程|$)/)
+  if (fromToMatch) {
+    const start = cleanFlowStep(fromToMatch[1])
+    const end = cleanFlowStep(fromToMatch[2])
+    if (start && end && start !== end) return [start, end]
+  }
+
+  const orderedKeywords = [
+    { pattern: /注册/, label: '注册' },
+    { pattern: /登录|登陆/, label: '登录' },
+    { pattern: /浏览|选择|选商品|商品/, label: '选商品' },
+    { pattern: /下单|订单/, label: '下单' },
+    { pattern: /支付|付款/, label: '支付' },
+    { pattern: /成功|完成/, label: '完成' },
+  ]
+  const keywordSteps = orderedKeywords
+    .filter((item) => item.pattern.test(text))
+    .map((item) => item.label)
+
+  if (keywordSteps.length >= 2) return Array.from(new Set(keywordSteps))
+
+  const planSteps = plan.elements
+    .map((element) => cleanFlowStep(element.name))
+    .filter(Boolean)
+  if (planSteps.length >= 2) return Array.from(new Set(planSteps))
+
+  return ['开始', '处理', '完成']
+}
+
+function nodeBoxStroke(label: string, cx: number, cy: number, width = 10, height = 8): FallbackSketchStroke {
+  const left = cx - width / 2
+  const right = cx + width / 2
+  const top = cy + height / 2
+  const bottom = cy - height / 2
+
+  return {
+    id: `${label} flowchart node`,
+    label,
+    labelPoint: [cx, cy],
+    points: [
+      [left, top],
+      [right, top],
+      [right, top],
+      [right, bottom],
+      [right, bottom],
+      [left, bottom],
+      [left, bottom],
+      [left, top],
+    ],
+  }
+}
+
+function arrowStrokes(fromX: number, toX: number, y: number): FallbackSketchStroke[] {
+  const start = fromX + 5.8
+  const end = toX - 5.8
+  return [
+    {
+      id: 'flow arrow connector',
+      points: [[start, y], [end, y]],
+    },
+    {
+      id: 'flow arrow head',
+      points: [[end - 1.8, y + 1.5], [end, y], [end - 1.8, y - 1.5]],
+    },
+  ]
+}
+
+function downArrowStrokes(x: number, fromY: number, toY: number): FallbackSketchStroke[] {
+  return [
+    {
+      id: 'funnel down arrow connector',
+      points: [[x, fromY], [x, toY]],
+    },
+    {
+      id: 'funnel down arrow head',
+      points: [[x - 1.5, toY + 1.8], [x, toY], [x + 1.5, toY + 1.8]],
+    },
+  ]
+}
+
+function createFlowchartSketchXML(text: string, plan: SketchPlan): string {
+  const steps = inferFlowSteps(text, plan).slice(0, 5)
+  const count = Math.max(2, steps.length)
+  const left = count <= 2 ? 16 : 8
+  const right = count <= 2 ? 34 : 42
+  const gap = count === 1 ? 0 : (right - left) / (count - 1)
+  const y = 25
+  const nodeCenters = steps.map((_, index) => [left + gap * index, y] as [number, number])
+  const strokes: FallbackSketchStroke[] = []
+
+  steps.forEach((step, index) => {
+    const [cx, cy] = nodeCenters[index]
+    strokes.push(nodeBoxStroke(step, cx, cy, count <= 3 ? 11 : 9, 8))
+    if (index < steps.length - 1) {
+      strokes.push(...arrowStrokes(cx, nodeCenters[index + 1][0], cy))
+    }
+  })
+
+  return `<thinking>Local fallback flowchart: ${escapeXml(steps.join(' -> '))}.</thinking>
+<concept>${escapeXml(plan.previewText || text)}</concept>
+<strokes>
+${strokes.map((stroke, index) => strokeToXml(stroke, index + 1)).join('\n')}
+</strokes>`
+}
+
+function funnelLayerStroke(label: string, cx: number, cy: number, topWidth: number, bottomWidth: number, height: number, color?: string): FallbackSketchStroke {
+  const topY = cy + height / 2
+  const bottomY = cy - height / 2
+
+  return {
+    id: `${label} funnel layer`,
+    color,
+    label,
+    labelPoint: [cx, cy],
+    points: [
+      [cx - topWidth / 2, topY],
+      [cx + topWidth / 2, topY],
+      [cx + bottomWidth / 2, bottomY],
+      [cx - bottomWidth / 2, bottomY],
+      [cx - topWidth / 2, topY],
+    ],
+  }
+}
+
+function createFunnelSketchXML(text: string, plan: SketchPlan): string {
+  const stages = normalizeFunnelElements(plan.elements, text).slice(0, 4)
+  const count = stages.length
+  const topY = count === 4 ? 38 : 36
+  const gap = count === 4 ? 8 : 10
+  const height = count === 4 ? 6 : 7
+  const strokes: FallbackSketchStroke[] = []
+
+  stages.forEach((stage, index) => {
+    const cy = topY - index * gap
+    const topWidth = 30 - index * 5
+    const bottomWidth = Math.max(10, topWidth - 4)
+    strokes.push(funnelLayerStroke(stage.name, 25, cy, topWidth, bottomWidth, height, stage.color))
+
+    if (index < count - 1) {
+      strokes.push(...downArrowStrokes(25, cy - height / 2 - 1, cy - gap + height / 2 + 1))
+    }
+  })
+
+  return `<thinking>Local fallback funnel: ${escapeXml(stages.map((stage) => stage.name).join(' -> '))}.</thinking>
+<concept>${escapeXml(plan.previewText || text)}</concept>
+<strokes>
+${strokes.map((stroke, index) => strokeToXml(stroke, index + 1)).join('\n')}
+</strokes>`
+}
+
+function buildElementStrokes(element: SketchPlan['elements'][number], index: number): FallbackSketchStroke[] {
+  const [cx, cy] = positionCenter(element.position, element.name)
+  const color = element.color
+  const name = `${element.name} ${element.details.join(' ')}`
+
+  if (/月亮|月牙/.test(name)) return buildMoonStrokes(cx, cy, color)
+  if (/女孩|小女孩|人物|人/.test(name)) return buildGirlStrokes(cx, cy, color)
+  if (/太阳/.test(name)) return buildSunStrokes(cx, cy, color)
+  if (/树/.test(name)) return buildTreeStrokes(cx, cy, color)
+  if (/星/.test(name)) return buildStarStrokes(cx + index * 3, cy, color)
+  if (/影子/.test(name)) return [{ id: 'soft ground shadow', color, points: [[cx - 6, cy], [cx - 2, cy - 1], [cx + 4, cy - 1], [cx + 7, cy]] }]
+
+  return buildGenericStrokes(cx, cy, element.name, color)
+}
+
+function createFallbackSketchXML(text: string, approvedPlan?: unknown): string {
+  const plan = normalizePlan(approvedPlan, text) || createFallbackPlan(text)
+  if (plan.intentType === 'funnel' || /漏斗|增长漏斗|转化漏斗/i.test(text)) {
+    return createFunnelSketchXML(text, plan)
+  }
+
+  if (plan.sceneType === 'whiteboard' || /流程图|流程|flow/i.test(text)) {
+    return createFlowchartSketchXML(text, plan)
+  }
+
+  const orderedElements = plan.drawingOrder
+    .map((name) => plan.elements.find((element) => element.name === name))
+    .filter((element): element is SketchPlan['elements'][number] => !!element)
+  const remainingElements = plan.elements.filter((element) => !orderedElements.includes(element))
+  const strokes = [...orderedElements, ...remainingElements].flatMap(buildElementStrokes)
+
+  return `<thinking>Local fallback sketch from the approved plan: ${escapeXml(plan.previewText)}.</thinking>
+<concept>${escapeXml(plan.previewText || text)}</concept>
+<strokes>
+${strokes.map((stroke, index) => strokeToXml(stroke, index + 1)).join('\n')}
+</strokes>`
 }
 
 function reviseFallbackPlan(plan: SketchPlan, revision: string): SketchPlan {
@@ -510,9 +1169,6 @@ function reviseFallbackPlan(plan: SketchPlan, revision: string): SketchPlan {
   const next: SketchPlan = {
     ...plan,
     elements: plan.elements.map((element) => ({ ...element, details: [...element.details] })),
-    detailChecklist: [...plan.detailChecklist],
-    avoid: [...plan.avoid],
-    polishHints: [...plan.polishHints],
   }
 
   if (/星星|星/.test(revision) && !next.elements.some((element) => element.name.includes('星'))) {
@@ -556,22 +1212,14 @@ function reviseFallbackPlan(plan: SketchPlan, revision: string): SketchPlan {
     next.drawingOrder.push('影子')
   }
 
-  if (/上|高一点/.test(revision)) {
-    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往上调整。`
-  } else if (/下|低一点/.test(revision)) {
-    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往下调整。`
-  } else if (/左/.test(revision)) {
-    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往左调整。`
-  } else if (/右/.test(revision)) {
-    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往右调整。`
+  // Apply directional hints to element positions
+  const dirHint = /上|高一点/.test(revision) ? '往上' : /下|低一点/.test(revision) ? '往下' : /左/.test(revision) ? '往左' : /右/.test(revision) ? '往右' : ''
+  if (dirHint) {
+    next.elements.forEach((element) => {
+      element.position = `${element.position}${dirHint}`
+    })
   }
 
-  next.detailChecklist = mergeUnique([
-    ...priorityDetails,
-    ...next.elements.flatMap((element) => element.details),
-    ...next.detailChecklist,
-  ], []).slice(0, 10)
-  next.polishHints = mergeUnique(['确认开始画', '再加一点细节', ...next.polishHints], []).slice(0, 5)
   next.previewText = plan.previewText
   return next
 }
@@ -597,7 +1245,7 @@ function buildSketchUserPrompt(concept: string, zone?: string | null, approvedPl
     : ''
   const planHint = approvedPlan
     ? `\n\n已批准的绘图计划（必须严格遵循）：${JSON.stringify(approvedPlan)}
-Draw every listed element as a separate recognizable part. Respect layoutBrief, styleBrief, detailChecklist, avoid, each element's details, position, and drawingOrder. If the plan describes a scene, do not collapse it into one symbol.`
+Draw every listed element as a separate recognizable part. Respect each element's name, position, color, role, and details. If the plan has connections, draw arrows or lines showing the direction (→ ↓ ↘). The <thinking> tag should describe your composition in your own words based on the plan's compositionRationale. Do not collapse a multi-element scene into one symbol.`
     : ''
   return `You need to produce a clean hand-drawn line-art sketch of: ${concept}${zoneHint}${planHint}
 
@@ -634,6 +1282,18 @@ You receive:
 - If adding new elements, place them in contextually appropriate positions
 - Maintain the same hand-drawn style — slight wobbles, no perfect geometry
 - Use the same stroke format (points + t_values)
+
+=== Vague instruction handling ===
+Users often give vague edit instructions like "加一点细节", "轮廓更清楚", "主体放大一点".
+When you receive such instructions:
+1. Look at the image and identify what is missing or ambiguous
+2. Translate the vague instruction into a concrete visual change
+3. Describe your interpretation in <thinking>, then execute
+
+Examples:
+- "加一点细节" → add missing texture lines, inner contours, or connecting details that make the subject more recognizable
+- "轮廓更清楚" → reinforce the main outline with clearer, more continuous strokes
+- "主体放大一点" → scale up the main element while keeping supporting elements in proportion
 
 === Output format ===
 Output ONLY in XML format. NO markdown code fences.
@@ -688,11 +1348,21 @@ IMPORTANT: Output ONLY the strokes for the new element. The system will combine 
  * Generate a structured drawing plan before drawing.
  */
 app.post('/api/sketch-plan', async (req, res) => {
-  const { text } = req.body
+  const { text, mode } = req.body
 
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing text parameter' })
   }
+
+  const modeToSceneType: Record<string, string> = {
+    free_draw: 'quick_sketch',
+    whiteboard_flow: 'whiteboard',
+    story_scene: 'story_scene',
+    teaching_diagram: 'teaching_diagram',
+  }
+  const modeHint = mode && typeof mode === 'string'
+    ? `\nSuggested scene type from user interface: ${modeToSceneType[mode] || mode}. Follow this unless the user's words clearly suggest another type.`
+    : ''
 
   const client = getOpenAIClient()
   if (!client) {
@@ -700,17 +1370,41 @@ app.post('/api/sketch-plan', async (req, res) => {
   }
 
   try {
-    const completion = await client.chat.completions.create({
-      model: getActiveModel(),
-      messages: [
-        { role: 'system', content: SKETCH_PLAN_PROMPT },
-        { role: 'user', content: text },
-      ],
-      temperature: 0.3,
-      max_tokens: 800,
-      // @ts-expect-error Mimo-specific
-      extra_body: { thinking: { type: "disabled" } },
-    })
+    const useThinking = shouldUsePlannerThinking(text, mode)
+    let completion
+
+    try {
+      completion = await client.chat.completions.create({
+        model: getActiveModel(),
+        messages: [
+          { role: 'system', content: SKETCH_PLAN_PROMPT },
+          { role: 'user', content: text + modeHint },
+        ],
+        temperature: 0.3,
+        max_tokens: useThinking ? 1200 : 800,
+        ...(useThinking ? {} : {
+          // @ts-expect-error Mimo-specific
+          extra_body: { thinking: { type: "disabled" } },
+        }),
+      })
+    } catch (firstError) {
+      if (useThinking && isThinkingParamError(firstError)) {
+        console.warn('[SketchPlan] Thinking mode caused param error, retrying without thinking')
+        completion = await client.chat.completions.create({
+          model: getActiveModel(),
+          messages: [
+            { role: 'system', content: SKETCH_PLAN_PROMPT },
+            { role: 'user', content: text + modeHint },
+          ],
+          temperature: 0.3,
+          max_tokens: 800,
+          // @ts-expect-error Mimo-specific
+          extra_body: { thinking: { type: "disabled" } },
+        })
+      } else {
+        throw firstError
+      }
+    }
 
     const content = completion.choices[0]?.message?.content || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
     if (!content) {
@@ -805,32 +1499,60 @@ app.post('/api/sketch', async (req, res) => {
 
   const client = getOpenAIClient()
   if (!client) {
-    return res.json({ ok: false, error: 'LLM not configured' })
+    return res.json({
+      ok: true,
+      sketch: createFallbackSketchXML(text, approvedPlan),
+      warning: 'LLM not configured; used fallback sketch',
+    })
   }
 
   try {
-    const completion = await client.chat.completions.create({
-      model: getActiveModel(),
-      messages: [
-        { role: 'system', content: SKETCH_SYSTEM_PROMPT },
-        { role: 'user', content: buildSketchUserPrompt(text, typeof zone === 'string' ? zone : null, approvedPlan || null) },
-      ],
-      temperature: 0.3,
-      max_tokens: 4000,
-      // @ts-expect-error Mimo-specific
-      extra_body: { thinking: { type: "disabled" } },
-    })
+    const sceneType = approvedPlan && typeof approvedPlan === 'object' && 'sceneType' in approvedPlan
+      ? (approvedPlan as Record<string, unknown>).sceneType as string
+      : 'quick_sketch'
+    const completion = await withTimeout(
+      client.chat.completions.create({
+        model: getActiveModel(),
+        messages: [
+          { role: 'system', content: buildSketchSystemPrompt(sceneType) },
+          { role: 'user', content: buildSketchUserPrompt(text, typeof zone === 'string' ? zone : null, approvedPlan || null) },
+        ],
+        temperature: 0.3,
+        max_tokens: 4000,
+        // @ts-expect-error Mimo-specific
+        extra_body: { thinking: { type: "disabled" } },
+      }),
+      SKETCH_REQUEST_TIMEOUT_MS,
+      'Sketch generation',
+    )
 
     const content = completion.choices[0]?.message?.content || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
     if (!content) {
-      return res.json({ ok: false, error: 'No response from LLM' })
+      return res.json({
+        ok: true,
+        sketch: createFallbackSketchXML(text, approvedPlan),
+        warning: 'No response from LLM; used fallback sketch',
+      })
+    }
+
+    if (!/<strokes>[\s\S]*?<\/strokes>/.test(content)) {
+      console.warn('[Sketch] Invalid XML, using local fallback:', content.slice(0, 200))
+      return res.json({
+        ok: true,
+        sketch: createFallbackSketchXML(text, approvedPlan),
+        warning: 'Invalid sketch XML; used fallback sketch',
+      })
     }
 
     console.log('[Sketch] Generated', content.slice(0, 200))
     return res.json({ ok: true, sketch: content })
   } catch (error) {
-    console.error('[Sketch] API error:', error)
-    return res.json({ ok: false, error: String(error).slice(0, 200) })
+    console.error('[Sketch] API error, using local fallback:', error)
+    return res.json({
+      ok: true,
+      sketch: createFallbackSketchXML(text, approvedPlan),
+      warning: String(error).slice(0, 200),
+    })
   }
 })
 

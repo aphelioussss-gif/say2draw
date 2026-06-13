@@ -23,6 +23,18 @@ export async function routeCommands(
     }
   }
 
+  // Clarification / refinement phrases — not drawing intents.
+  // These are follow-up questions about existing content, not new drawing commands.
+  if (/^(再详细|详细一点|说具体|展开一下|什么意思|更详细|具体一点|解释一下|怎么说|还能怎么|不清楚|不太明白)/.test(rawText.trim())) {
+    return [{
+      type: 'ask_clarification',
+      rawText,
+      parseSource: 'local',
+      createdAt,
+      message: rawText,
+    }]
+  }
+
   // Everything else: unified sketch pipeline (LLM handles intent understanding)
   return [{
     type: 'generate_sketch',

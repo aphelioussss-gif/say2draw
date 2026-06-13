@@ -4,6 +4,8 @@ export type RawStroke = {
   tValues: number[]  // [0.0, 0.3, 0.5, 1.0]
   id?: string        // semantic label ("head", "left ear", etc.)
   color?: string     // hex color from six-color palette, defaults to #111827
+  label?: string     // optional text rendered near this stroke, useful for diagrams
+  labelPoint?: string // grid coordinate for the label anchor
 }
 
 /** Parsed sketch from LLM XML output */
@@ -23,6 +25,8 @@ export type RenderedStroke = {
   id: string
   segments: BezierSegment[]
   color: string
+  label?: string
+  labelPoint?: ControlPoint
 }
 
 /** Grid configuration for coordinate mapping */

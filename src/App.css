@@ -400,6 +400,83 @@
   box-shadow: 0 2px 12px rgba(31, 35, 40, 0.06);
 }
 
+.plan-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  padding: 28px;
+}
+
+.plan-confirm-panel {
+  width: min(520px, 86%);
+  padding: 22px 24px;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 16px 38px rgba(31, 35, 40, 0.14);
+  text-align: center;
+}
+
+.plan-confirm-kicker {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.plan-confirm-panel h3 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.plan-confirm-order {
+  margin: 10px 0 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.plan-confirm-phrases {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.plan-confirm-phrases span {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.plan-confirm-warning {
+  margin: 14px 0 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(154, 103, 0, 0.28);
+  border-radius: var(--radius-sm);
+  background: rgba(251, 243, 219, 0.8);
+  color: var(--accent-yellow);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 /* ---- Context Panel (Right) ---- */
 
 .context-panel {

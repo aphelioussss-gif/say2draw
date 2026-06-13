@@ -3,6 +3,7 @@ import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
 import { SketchLayer } from './components/SketchLayer'
 import { PlanCompanion } from './components/PlanCompanion'
+import { PlanConfirmOverlay } from './components/PlanConfirmOverlay'
 import { SidebarNav } from './components/SidebarNav'
 import { ConfigPage } from './components/ConfigPage'
 import { VoiceStatusBar } from './components/VoiceStatusBar'
@@ -23,6 +24,11 @@ import { parseSketchXML } from './sketch/sketchParser'
 import { fitBezierCurve } from './sketch/bezierFitter'
 import { gridToPixel } from './sketch/svgRenderer'
 import { captureCanvas } from './sketch/canvasCapture'
+import {
+  parseLocalAdjustment,
+  applyLocalAdjustment,
+  getAdjustmentFeedback,
+} from './domain/sketchTransform'
 import type { RenderedStroke, RawStroke, BezierSegment, ControlPoint } from './sketch/types'
 import {
   type AppPage,
@@ -64,9 +70,9 @@ function getSketchPixelBounds(strokes: ControlPoint[][]) {
   }
 }
 
-function normalizeSketchPoints(strokes: ControlPoint[][]): ControlPoint[][] {
+function createSketchNormalizer(strokes: ControlPoint[][]): (point: ControlPoint) => ControlPoint {
   const bounds = getSketchPixelBounds(strokes)
-  if (!bounds) return strokes
+  if (!bounds) return (point) => point
 
   const targetWidth = CANVAS_WIDTH * 0.68
   const targetHeight = CANVAS_HEIGHT * 0.68
@@ -80,23 +86,32 @@ function normalizeSketchPoints(strokes: ControlPoint[][]): ControlPoint[][] {
   const targetCenterX = CANVAS_WIDTH / 2
   const targetCenterY = CANVAS_HEIGHT / 2
 
-  return strokes.map((stroke) =>
-    stroke.map(([x, y]) => [
-      targetCenterX + (x - centerX) * scale,
-      targetCenterY + (y - centerY) * scale,
-    ]),
-  )
+  return ([x, y]) => [
+    targetCenterX + (x - centerX) * scale,
+    targetCenterY + (y - centerY) * scale,
+  ]
+}
+
+function gridCellToPixel(cell: string): ControlPoint | null {
+  const m = cell.match(/x(\d+)y(\d+)/)
+  if (!m) return null
+  return gridToPixel(parseInt(m[1], 10), parseInt(m[2], 10), GRID_RES, CANVAS_WIDTH, CANVAS_HEIGHT)
+}
+
+function normalizeLabelPoint(raw: RawStroke, normalizePoint: (point: ControlPoint) => ControlPoint): ControlPoint | undefined {
+  if (!raw.labelPoint) return undefined
+  const point = gridCellToPixel(raw.labelPoint)
+  return point ? normalizePoint(point) : undefined
 }
 
 function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
   const pixelStrokes = rawStrokes.map((raw) =>
-    raw.points.map((cell) => {
-      const m = cell.match(/x(\d+)y(\d+)/)
-      if (!m) return [0, 0] as [number, number]
-      return gridToPixel(parseInt(m[1], 10), parseInt(m[2], 10), GRID_RES, CANVAS_WIDTH, CANVAS_HEIGHT)
-    }),
+    raw.points.map((cell) => gridCellToPixel(cell) ?? [0, 0] as [number, number]),
   )
-  const normalizedStrokes = normalizeSketchPoints(pixelStrokes)
+  const normalizePoint = createSketchNormalizer(pixelStrokes)
+  const normalizedStrokes = pixelStrokes.map((stroke) =>
+    stroke.map((point) => normalizePoint(point)),
+  )
 
   return rawStrokes.map((raw, i) => {
     const sampledPoints = normalizedStrokes[i] ?? []
@@ -116,6 +131,8 @@ function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
       id: raw.id || `stroke-${i}`,
       segments: validSegments,
       color: raw.color || '#111827',
+      label: raw.label,
+      labelPoint: normalizeLabelPoint(raw, normalizePoint),
     }
   }).filter((s) => s.segments.length > 0)
 }
@@ -139,16 +156,16 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   // ---- Plan state (Plan→Confirm→Execute flow) ----
+  type PlanConnection = { from: string; to: string; direction: string }
+
   type PendingPlan = {
     originalText: string
+    intentType?: string
+    compositionRationale?: string
     sceneType?: string
     previewText: string
-    layoutBrief?: string
-    styleBrief?: string
-    polishHints: string[]
     drawingOrder?: string[]
-    detailChecklist?: string[]
-    avoid?: string[]
+    connections?: PlanConnection[]
     elements: Array<{ name: string; position: string; color: string; role: string; details?: string[] }>
   }
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null)
@@ -303,11 +320,11 @@ function App() {
       if (data.ok && data.plan) {
         setPendingPlan({ ...data.plan, originalText: rawText })
         const preview = data.plan.previewText || '已生成绘图计划'
-        const hints = data.plan.polishHints?.length
-          ? `。画完后可以说：${data.plan.polishHints.slice(0, 2).join('、')}`
-          : ''
-        const message = `${preview}。可以说确认开始画，取消重来，也可以继续说你想怎么改。${hints}`
+        const message = `${preview}。可以说确认开始画，取消重来，也可以继续说你想怎么改。`
         setFeedbackMessage(message)
+        if (!speech.isManuallyPausedRef.current) {
+          speech.resumeListening()
+        }
         speechFeedback.speak(message, {
           onEnd: () => {
             if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -423,10 +440,7 @@ function App() {
             message: `Generated sketch: ${parsed.concept}`,
           })
 
-          const polish = plan.polishHints?.length
-            ? ` 可以继续说：${plan.polishHints.slice(0, 3).join('、')}`
-            : ''
-          const message = `已为你画了${parsed.concept}的草图。${polish}`
+          const message = `已为你画了${parsed.concept}的草图。你可以继续说：加一点细节、轮廓更清楚、放大主体。`
           setFeedbackMessage(message)
           speechFeedback.speak(message, {
             onEnd: () => {
@@ -527,7 +541,7 @@ function App() {
   const speech = useSpeechRecognition({
     shouldIgnoreResult: () => speechFeedback.isSpeaking,
     onFinalTranscript: (transcript) => {
-      speech.pauseListening()
+      speech.pauseListening({ manual: false })
 
       // Plan confirmation routing: confirm or cancel a pending plan
       if (pendingPlan !== null) {
@@ -545,13 +559,21 @@ function App() {
           })
           return
         }
+        // Refinement / elaboration phrases — revise plan without confirming
+        if (/^(再详细|详细一点|说具体|展开一下|更详细|具体一点|解释一下|还不够|能再|再具体|展开说说)/.test(transcript.trim())) {
+          revisePendingPlan('请把当前计划拆得更细，让元素和绘制顺序更具体')
+          return
+        }
         revisePendingPlan(transcript)
         return
       }
 
       // Sketch modifier routing: sketch mode only
-      if (sketchMode !== null && /^(长一点|长一些|加长|短一点|短一些|缩短|大一点|大一些|放大|小一点|小一些|缩小|往左|往右|往上|往下|颜色改|改颜色|重来|就这样|可以了|好了|算了|不画了)/.test(transcript.trim())) {
-        if (/^(就这样|可以了|好了|算了|不画了)/.test(transcript.trim())) {
+      if (sketchMode !== null) {
+        const trimmed = transcript.trim()
+
+        // 1. Exit commands
+        if (/^(就这样|可以了|好了|算了|不画了)/.test(trimmed)) {
           setSketchMode(null)
           setFeedbackMessage('好的，草图已确认')
           speechFeedback.speak('好的，草图已确认', {
@@ -561,13 +583,45 @@ function App() {
           })
           return
         }
-        handleSketchEdit(transcript)
-        return
+
+        // 2. Local deterministic adjustments (move/scale/color) — no LLM
+        const localAdj = parseLocalAdjustment(trimmed)
+        if (localAdj) {
+          setSketchStrokes((prev) => applyLocalAdjustment(prev, localAdj))
+          const feedback = getAdjustmentFeedback(localAdj)
+          setFeedbackMessage(feedback)
+          speechFeedback.speak(feedback, {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+
+        // 3. Other sketch-mode edits that need LLM (loose match anywhere in transcript)
+        if (/长一点|长一些|加长|短一点|短一些|缩短|重来/.test(trimmed)) {
+          handleSketchEdit(transcript)
+          return
+        }
+
+        // 4. Falls through to routeCommands (may route to handleGenerateSketch → handleSketchEdit)
       }
 
       setFeedbackMessage('思考中...')
 
       routeCommands(transcript).then((actions) => {
+        // Clarification / refinement without context — prompt user to describe
+        const clarifyAction = actions.find((a) => a.type === 'ask_clarification')
+        if (clarifyAction) {
+          setFeedbackMessage('你想让我把哪张图说得更详细？请先描述要画的内容。')
+          speechFeedback.speak('你想让我把哪张图说得更详细？请先描述要画的内容。', {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+
         const sketchAction = actions.find((a) => a.type === 'generate_sketch')
         if (sketchAction) {
           handleGenerateSketch(transcript)
@@ -741,13 +795,14 @@ function App() {
                 <CanvasBoard
                   ref={canvasRef}
                   shapes={state.shapes}
-                  hasOverlayContent={sketchStrokes.length > 0}
+                  hasOverlayContent={sketchStrokes.length > 0 || pendingPlan !== null}
                 />
                 <SketchLayer
                   strokes={sketchStrokes}
                   width={CANVAS_WIDTH}
                   height={CANVAS_HEIGHT}
                 />
+                <PlanConfirmOverlay plan={pendingPlan} voiceStatus={speech.status} />
               </div>
             </section>
           </div>

@@ -52,6 +52,10 @@ export type DrawingAction =
       type: 'parse_error'
       message: string
     })
+  | (CommandMeta & {
+      type: 'ask_clarification'
+      message: string
+    })
 
 export type CommandRecord = {
   id: string

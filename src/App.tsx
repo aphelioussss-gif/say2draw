@@ -752,7 +752,11 @@ function App() {
 
         <section className="canvas-area" aria-label="Canvas board">
           <div className="canvas-stage" style={{ position: 'relative' }}>
-            <CanvasBoard ref={canvasRef} shapes={state.shapes} />
+            <CanvasBoard
+              ref={canvasRef}
+              shapes={state.shapes}
+              hasOverlayContent={sketchStrokes.length > 0}
+            />
             <SketchLayer
               strokes={sketchStrokes}
               width={CANVAS_WIDTH}

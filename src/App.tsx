@@ -3,6 +3,7 @@ import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
 import { SketchLayer } from './components/SketchLayer'
 import { PlanCompanion } from './components/PlanCompanion'
+import { PlanConfirmOverlay } from './components/PlanConfirmOverlay'
 import { SidebarNav } from './components/SidebarNav'
 import { ConfigPage } from './components/ConfigPage'
 import { VoiceStatusBar } from './components/VoiceStatusBar'
@@ -64,9 +65,9 @@ function getSketchPixelBounds(strokes: ControlPoint[][]) {
   }
 }
 
-function normalizeSketchPoints(strokes: ControlPoint[][]): ControlPoint[][] {
+function createSketchNormalizer(strokes: ControlPoint[][]): (point: ControlPoint) => ControlPoint {
   const bounds = getSketchPixelBounds(strokes)
-  if (!bounds) return strokes
+  if (!bounds) return (point) => point
 
   const targetWidth = CANVAS_WIDTH * 0.68
   const targetHeight = CANVAS_HEIGHT * 0.68
@@ -80,23 +81,32 @@ function normalizeSketchPoints(strokes: ControlPoint[][]): ControlPoint[][] {
   const targetCenterX = CANVAS_WIDTH / 2
   const targetCenterY = CANVAS_HEIGHT / 2
 
-  return strokes.map((stroke) =>
-    stroke.map(([x, y]) => [
-      targetCenterX + (x - centerX) * scale,
-      targetCenterY + (y - centerY) * scale,
-    ]),
-  )
+  return ([x, y]) => [
+    targetCenterX + (x - centerX) * scale,
+    targetCenterY + (y - centerY) * scale,
+  ]
+}
+
+function gridCellToPixel(cell: string): ControlPoint | null {
+  const m = cell.match(/x(\d+)y(\d+)/)
+  if (!m) return null
+  return gridToPixel(parseInt(m[1], 10), parseInt(m[2], 10), GRID_RES, CANVAS_WIDTH, CANVAS_HEIGHT)
+}
+
+function normalizeLabelPoint(raw: RawStroke, normalizePoint: (point: ControlPoint) => ControlPoint): ControlPoint | undefined {
+  if (!raw.labelPoint) return undefined
+  const point = gridCellToPixel(raw.labelPoint)
+  return point ? normalizePoint(point) : undefined
 }
 
 function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
   const pixelStrokes = rawStrokes.map((raw) =>
-    raw.points.map((cell) => {
-      const m = cell.match(/x(\d+)y(\d+)/)
-      if (!m) return [0, 0] as [number, number]
-      return gridToPixel(parseInt(m[1], 10), parseInt(m[2], 10), GRID_RES, CANVAS_WIDTH, CANVAS_HEIGHT)
-    }),
+    raw.points.map((cell) => gridCellToPixel(cell) ?? [0, 0] as [number, number]),
   )
-  const normalizedStrokes = normalizeSketchPoints(pixelStrokes)
+  const normalizePoint = createSketchNormalizer(pixelStrokes)
+  const normalizedStrokes = pixelStrokes.map((stroke) =>
+    stroke.map((point) => normalizePoint(point)),
+  )
 
   return rawStrokes.map((raw, i) => {
     const sampledPoints = normalizedStrokes[i] ?? []
@@ -116,6 +126,8 @@ function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
       id: raw.id || `stroke-${i}`,
       segments: validSegments,
       color: raw.color || '#111827',
+      label: raw.label,
+      labelPoint: normalizeLabelPoint(raw, normalizePoint),
     }
   }).filter((s) => s.segments.length > 0)
 }
@@ -139,11 +151,16 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   // ---- Plan state (Plan→Confirm→Execute flow) ----
+  type PlanConnection = { from: string; to: string; direction: string }
+
   type PendingPlan = {
     originalText: string
+    intentType?: string
+    compositionRationale?: string
     sceneType?: string
     previewText: string
     drawingOrder?: string[]
+    connections?: PlanConnection[]
     elements: Array<{ name: string; position: string; color: string; role: string; details?: string[] }>
   }
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null)
@@ -300,6 +317,9 @@ function App() {
         const preview = data.plan.previewText || '已生成绘图计划'
         const message = `${preview}。可以说确认开始画，取消重来，也可以继续说你想怎么改。`
         setFeedbackMessage(message)
+        if (!speech.isManuallyPausedRef.current) {
+          speech.resumeListening()
+        }
         speechFeedback.speak(message, {
           onEnd: () => {
             if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -516,7 +536,7 @@ function App() {
   const speech = useSpeechRecognition({
     shouldIgnoreResult: () => speechFeedback.isSpeaking,
     onFinalTranscript: (transcript) => {
-      speech.pauseListening()
+      speech.pauseListening({ manual: false })
 
       // Plan confirmation routing: confirm or cancel a pending plan
       if (pendingPlan !== null) {
@@ -730,13 +750,14 @@ function App() {
                 <CanvasBoard
                   ref={canvasRef}
                   shapes={state.shapes}
-                  hasOverlayContent={sketchStrokes.length > 0}
+                  hasOverlayContent={sketchStrokes.length > 0 || pendingPlan !== null}
                 />
                 <SketchLayer
                   strokes={sketchStrokes}
                   width={CANVAS_WIDTH}
                   height={CANVAS_HEIGHT}
                 />
+                <PlanConfirmOverlay plan={pendingPlan} voiceStatus={speech.status} />
               </div>
             </section>
           </div>

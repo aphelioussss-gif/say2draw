@@ -559,6 +559,11 @@ function App() {
           })
           return
         }
+        // Refinement / elaboration phrases — revise plan without confirming
+        if (/^(再详细|详细一点|说具体|展开一下|更详细|具体一点|解释一下|还不够|能再|再具体|展开说说)/.test(transcript.trim())) {
+          revisePendingPlan('请把当前计划拆得更细，让元素和绘制顺序更具体')
+          return
+        }
         revisePendingPlan(transcript)
         return
       }
@@ -605,6 +610,18 @@ function App() {
       setFeedbackMessage('思考中...')
 
       routeCommands(transcript).then((actions) => {
+        // Clarification / refinement without context — prompt user to describe
+        const clarifyAction = actions.find((a) => a.type === 'ask_clarification')
+        if (clarifyAction) {
+          setFeedbackMessage('你想让我把哪张图说得更详细？请先描述要画的内容。')
+          speechFeedback.speak('你想让我把哪张图说得更详细？请先描述要画的内容。', {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+
         const sketchAction = actions.find((a) => a.type === 'generate_sketch')
         if (sketchAction) {
           handleGenerateSketch(transcript)

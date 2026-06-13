@@ -166,10 +166,10 @@ export function drawingReducer(
     }
   }
 
-  if (action.type === 'parse_error') {
+  if (action.type === 'parse_error' || action.type === 'ask_clarification') {
     return {
       ...state,
-      history: pushHistory(state, createRecord(action, 'error', action.message)),
+      history: pushHistory(state, createRecord(action, 'ignored', action.message)),
     }
   }
 

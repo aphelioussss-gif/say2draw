@@ -103,10 +103,6 @@ Steps:
 3. Decide on the key elements and their positions.
 4. Explain your translation in <thinking>, then draw normally.
 
-Example: "女性很有困境" → feeling: pressure / constraint / struggle
-→ metaphor: a female figure surrounded by oppressive shapes, or standing alone in a narrow space
-→ elements: female silhouette (center), enclosing lines or barriers (surrounding), a faint opening or light (top)
-
 === Output format ===
 Output ONLY in XML. NO markdown fences.
 
@@ -297,7 +293,7 @@ Decide what kind of drawing the user needs:
 - flowchart: process steps connected by arrows (login→pay, A→B→C).
 - funnel: stages that narrow down (user growth, sales pipeline, conversion).
 - architecture: system modules with connections (microservices, platform diagram).
-- story_scene: narrative or emotional scenes. Use for abstract inputs too (emotions, moods, "女性很有困境").
+- story_scene: narrative or emotional scenes. Use for abstract inputs too (emotions, moods).
 - teaching_diagram: educational layered explanation (photosynthesis, water cycle).
 - free_sketch: the user just wants to see something drawn, no diagram structure needed.
 

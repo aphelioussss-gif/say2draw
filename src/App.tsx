@@ -299,6 +299,18 @@ function App() {
   // ---- Sketch generation ----
 
   async function handleGenerateSketch(rawText: string) {
+    // If sketch already exists on canvas, route to multimodal edit (accumulation)
+    if (sketchMode !== null) {
+      const zone = extractSpatialZone(rawText)
+      const zoneNames: Record<string, string> = {
+        center: '中间', top: '上方', bottom: '下方', left: '左边', right: '右边',
+        topLeft: '左上角', topRight: '右上角', bottomLeft: '左下角', bottomRight: '右下角',
+      }
+      const zoneHint = zone ? `在画布${zoneNames[zone] || zone}` : '在画布上'
+      const instruction = `${zoneHint}添加以下内容，保持已有内容完全不变：${rawText}`
+      handleSketchEdit(instruction)
+      return
+    }
     setIsGeneratingSketch(true)
     setFeedbackMessage('正在绘制草图...')
     speechFeedback.speak('正在绘制草图...', {

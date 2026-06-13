@@ -44,9 +44,21 @@ function renderStrokeGroup(stroke: RenderedStroke, index: number, strokeWidth: n
     .join('\n    ')
 
   const color = stroke.color || '#111827'
+  const label = stroke.label && stroke.labelPoint
+    ? `<text x="${stroke.labelPoint[0].toFixed(1)}" y="${stroke.labelPoint[1].toFixed(1)}" text-anchor="middle" dominant-baseline="central" fill="#111827" stroke="none" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="650">${escapeSvgText(stroke.label)}</text>`
+    : ''
+
   return `<g id="s${index + 1}" stroke="${color}" stroke-width="${strokeWidth}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.92">
     ${paths}
+    ${label}
   </g>`
+}
+
+function escapeSvgText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 }
 
 /**

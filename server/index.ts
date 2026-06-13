@@ -469,6 +469,10 @@ function normalizePlan(value: unknown, originalText: string): SketchPlan | null 
 
   const sceneType = inferSceneTypeFromIntent(intentType)
 
+  const structuredElements = intentType === 'funnel'
+    ? normalizeFunnelElements(safeElements, originalText)
+    : safeElements
+
   const rawConnections = Array.isArray(data.connections) ? data.connections : []
   const connections: PlanConnection[] | undefined = rawConnections.length > 0
     ? rawConnections
@@ -485,17 +489,66 @@ function normalizePlan(value: unknown, originalText: string): SketchPlan | null 
     intentType,
     compositionRationale: typeof data.compositionRationale === 'string' && data.compositionRationale.trim()
       ? data.compositionRationale.trim()
-      : buildFallbackRationale(intentType, safeElements, originalText),
+      : buildFallbackRationale(intentType, structuredElements, originalText),
     sceneType,
     previewText: typeof data.previewText === 'string' && data.previewText.trim()
       ? data.previewText.trim().slice(0, 40)
       : buildFallbackPreview(originalText),
-    elements: safeElements,
-    connections: connections && connections.length > 0 ? connections : undefined,
-    drawingOrder: Array.isArray(data.drawingOrder) && data.drawingOrder.every((item) => typeof item === 'string')
+    elements: structuredElements,
+    connections: intentType === 'funnel'
+      ? buildSequentialConnections(structuredElements, '↓')
+      : connections && connections.length > 0 ? connections : undefined,
+    drawingOrder: intentType !== 'funnel' && Array.isArray(data.drawingOrder) && data.drawingOrder.every((item) => typeof item === 'string')
       ? data.drawingOrder as string[]
-      : safeElements.map((item) => item.name),
+      : structuredElements.map((item) => item.name),
   }
+}
+
+function buildSequentialConnections(elements: PlanElement[], direction: string): PlanConnection[] | undefined {
+  if (elements.length < 2) return undefined
+  return elements.slice(0, -1).map((element, index) => ({
+    from: element.name,
+    to: elements[index + 1].name,
+    direction,
+  }))
+}
+
+function normalizeFunnelElements(elements: PlanElement[], text: string): PlanElement[] {
+  const stageNames = inferFunnelStages(text, elements)
+  const colors = ['#3b82f6', '#22c55e', '#eab308', '#ef4444']
+
+  return stageNames.map((name, index) => ({
+    name,
+    position: ['上层', '中层', '下层', '底层'][index] || `第${index + 1}层`,
+    color: colors[index % colors.length],
+    role: 'main',
+    details: [
+      index === 0 ? '最宽的入口层' : index === stageNames.length - 1 ? '最窄的结果层' : '逐步收窄的中间层',
+      '梯形分层',
+      '阶段文字居中',
+    ],
+  }))
+}
+
+function inferFunnelStages(text: string, elements: PlanElement[]): string[] {
+  const usablePlanStages = elements
+    .map((element) => element.name.trim())
+    .filter((name) => name && !/阶段|漏斗|三阶段|用户增长/.test(name))
+
+  const requestedCount = /三|3/.test(text)
+    ? 3
+    : /四|4/.test(text)
+      ? 4
+      : Math.max(usablePlanStages.length, 3)
+
+  if (usablePlanStages.length >= requestedCount) {
+    return usablePlanStages.slice(0, requestedCount)
+  }
+
+  if (/用户增长|增长/.test(text)) return ['获客', '激活', '留存'].slice(0, requestedCount)
+  if (/销售|线索|成交/.test(text)) return ['线索', '沟通', '成交'].slice(0, requestedCount)
+  if (/转化|购买|支付/.test(text)) return ['曝光', '点击', '转化'].slice(0, requestedCount)
+  return ['认知', '兴趣', '转化', '留存'].slice(0, requestedCount)
 }
 
 function normalizeStringArray(value: unknown, fallback: string[]): string[] {
@@ -582,12 +635,17 @@ function createFallbackPlan(text: string): SketchPlan {
     sceneType: inferSceneTypeFromIntent(intentType),
     previewText: buildFallbackPreview(text),
     elements,
+    connections: intentType === 'funnel' ? buildSequentialConnections(elements, '↓') : undefined,
     drawingOrder: elements.map((element) => element.name),
   }
 }
 
 function inferFallbackElements(text: string, subject: string): SketchPlan['elements'] {
   const elements: SketchPlan['elements'] = []
+
+  if (/漏斗|转化|增长/.test(text)) {
+    return normalizeFunnelElements([], text)
+  }
 
   if (/月亮/.test(text)) {
     elements.push({
@@ -890,6 +948,19 @@ function arrowStrokes(fromX: number, toX: number, y: number): FallbackSketchStro
   ]
 }
 
+function downArrowStrokes(x: number, fromY: number, toY: number): FallbackSketchStroke[] {
+  return [
+    {
+      id: 'funnel down arrow connector',
+      points: [[x, fromY], [x, toY]],
+    },
+    {
+      id: 'funnel down arrow head',
+      points: [[x - 1.5, toY + 1.8], [x, toY], [x + 1.5, toY + 1.8]],
+    },
+  ]
+}
+
 function createFlowchartSketchXML(text: string, plan: SketchPlan): string {
   const steps = inferFlowSteps(text, plan).slice(0, 5)
   const count = Math.max(2, steps.length)
@@ -915,6 +986,51 @@ ${strokes.map((stroke, index) => strokeToXml(stroke, index + 1)).join('\n')}
 </strokes>`
 }
 
+function funnelLayerStroke(label: string, cx: number, cy: number, topWidth: number, bottomWidth: number, height: number, color?: string): FallbackSketchStroke {
+  const topY = cy + height / 2
+  const bottomY = cy - height / 2
+
+  return {
+    id: `${label} funnel layer`,
+    color,
+    label,
+    labelPoint: [cx, cy],
+    points: [
+      [cx - topWidth / 2, topY],
+      [cx + topWidth / 2, topY],
+      [cx + bottomWidth / 2, bottomY],
+      [cx - bottomWidth / 2, bottomY],
+      [cx - topWidth / 2, topY],
+    ],
+  }
+}
+
+function createFunnelSketchXML(text: string, plan: SketchPlan): string {
+  const stages = normalizeFunnelElements(plan.elements, text).slice(0, 4)
+  const count = stages.length
+  const topY = count === 4 ? 38 : 36
+  const gap = count === 4 ? 8 : 10
+  const height = count === 4 ? 6 : 7
+  const strokes: FallbackSketchStroke[] = []
+
+  stages.forEach((stage, index) => {
+    const cy = topY - index * gap
+    const topWidth = 30 - index * 5
+    const bottomWidth = Math.max(10, topWidth - 4)
+    strokes.push(funnelLayerStroke(stage.name, 25, cy, topWidth, bottomWidth, height, stage.color))
+
+    if (index < count - 1) {
+      strokes.push(...downArrowStrokes(25, cy - height / 2 - 1, cy - gap + height / 2 + 1))
+    }
+  })
+
+  return `<thinking>Local fallback funnel: ${escapeXml(stages.map((stage) => stage.name).join(' -> '))}.</thinking>
+<concept>${escapeXml(plan.previewText || text)}</concept>
+<strokes>
+${strokes.map((stroke, index) => strokeToXml(stroke, index + 1)).join('\n')}
+</strokes>`
+}
+
 function buildElementStrokes(element: SketchPlan['elements'][number], index: number): FallbackSketchStroke[] {
   const [cx, cy] = positionCenter(element.position, element.name)
   const color = element.color
@@ -932,6 +1048,10 @@ function buildElementStrokes(element: SketchPlan['elements'][number], index: num
 
 function createFallbackSketchXML(text: string, approvedPlan?: unknown): string {
   const plan = normalizePlan(approvedPlan, text) || createFallbackPlan(text)
+  if (plan.intentType === 'funnel' || /漏斗|增长漏斗|转化漏斗/i.test(text)) {
+    return createFunnelSketchXML(text, plan)
+  }
+
   if (plan.sceneType === 'whiteboard' || /流程图|流程|flow/i.test(text)) {
     return createFlowchartSketchXML(text, plan)
   }

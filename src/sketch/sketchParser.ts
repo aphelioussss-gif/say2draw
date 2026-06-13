@@ -40,6 +40,8 @@ export function parseSketchXML(llmOutput: string, gridRes: number): SketchOutput
     const tValuesMatch = strokeContent.match(/<t_values>([\s\S]*?)<\/t_values>/)
     const idMatch = strokeContent.match(/<id>([\s\S]*?)<\/id>/)
     const colorMatch = strokeContent.match(/<color>([\s\S]*?)<\/color>/)
+    const labelMatch = strokeContent.match(/<label>([\s\S]*?)<\/label>/)
+    const labelPointMatch = strokeContent.match(/<label_point>([\s\S]*?)<\/label_point>/)
 
     if (!pointsMatch) continue
 
@@ -77,6 +79,8 @@ export function parseSketchXML(llmOutput: string, gridRes: number): SketchOutput
       tValues,
       id: idMatch?.[1]?.trim(),
       color: colorMatch?.[1]?.trim(),
+      label: labelMatch?.[1]?.trim(),
+      labelPoint: labelPointMatch?.[1]?.trim(),
     })
   }
 

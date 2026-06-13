@@ -47,6 +47,10 @@ export function getActionFeedback(action: DrawingAction): string {
     return '已撤销上一步'
   }
 
+  if (action.type === 'parse_error') {
+    return action.message || '我还没有听懂这条指令，请换一种说法'
+  }
+
   return '我还没有听懂这条指令，请换一种说法'
 }
 

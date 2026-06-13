@@ -38,7 +38,7 @@ function getOpenAIClient(): OpenAI | null {
 
 // Inline schema for the system prompt (json_object mode)
 const OUTPUT_SCHEMA_TEXT = `{
-  "actions"?: [                       // preferred for scenes or objects decomposed into multiple shapes
+  "actions": [                        // REQUIRED: always use this array, even for single actions
     {
       "type": "add_shape" | "clear_canvas" | "undo" | "ask_clarification",
       "shape"?: {                     // only for add_shape
@@ -54,20 +54,7 @@ const OUTPUT_SCHEMA_TEXT = `{
       },
       "clarification"?: string        // only for ask_clarification
     }
-  ],
-  "type"?: "add_shape" | "clear_canvas" | "undo" | "ask_clarification", // allowed for simple single action
-  "shape"?: {
-    "type": "circle" | "ellipse" | "rect" | "line" | "polygon" | "text",
-    "x": number, "y": number,
-    "radius"?: number,                // circle only
-    "radiusX"?: number, "radiusY"?: number, // ellipse only
-    "width"?: number, "height"?: number, // rect only
-    "x1"?: number, "y1"?: number, "x2"?: number, "y2"?: number, // line only
-    "points"?: [{ "x": number, "y": number }], // polygon only, 3-8 points
-    "text"?: string, "fontSize"?: number, // text only
-    "fill"?: string, "stroke"?: string, "lineWidth"?: number
-  },
-  "clarification"?: string           // only for ask_clarification
+  ]
 }`
 
 // Parse command endpoint
@@ -133,9 +120,9 @@ Layer 3 - Truly Unrepresentable:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: text },
       ],
-      response_format: { type: 'json_object' },
+
       temperature: 0.3,
-      max_tokens: 500,
+      max_tokens: 1200,
     })
 
     const content = completion.choices[0]?.message?.content
@@ -147,14 +134,24 @@ Layer 3 - Truly Unrepresentable:
 
     // Strip markdown fences if the model ignores the instruction
     const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    console.log('[LLM Raw]', content.slice(0, 300))
+    console.log('[LLM Cleaned Length]', cleaned.length)
 
     try {
       const parsed = JSON.parse(cleaned)
+      console.log('[LLM Response]', JSON.stringify(parsed).slice(0, 400))
       if (Array.isArray(parsed.actions)) {
         return res.json({ ok: true, actions: parsed.actions })
       }
-      return res.json({ ok: true, action: parsed })
-    } catch {
+      // Fallback: wrap bare single-action response in actions array
+      if (parsed.type) {
+        console.log('[LLM Warning] Model returned single action instead of actions array. Type:', parsed.type)
+        return res.json({ ok: true, actions: [parsed] })
+      }
+      return res.json({ ok: false, error: 'LLM returned no actions array', raw: cleaned.slice(0, 200) })
+    } catch (e) {
+      console.log('[LLM Parse Error]', String(e))
+      console.log('[LLM Full Content]', cleaned)
       return res.json({ ok: false, error: 'Invalid JSON response from LLM', raw: cleaned.slice(0, 200) })
     }
   } catch (error) {

@@ -38,7 +38,7 @@ function getOpenAIClient(): OpenAI | null {
 
 // Inline schema for the system prompt (json_object mode)
 const OUTPUT_SCHEMA_TEXT = `{
-  "actions"?: [                       // preferred for scenes or objects decomposed into multiple shapes
+  "actions": [                        // REQUIRED: always use this array, even for single actions
     {
       "type": "add_shape" | "clear_canvas" | "undo" | "ask_clarification",
       "shape"?: {                     // only for add_shape
@@ -55,21 +55,7 @@ const OUTPUT_SCHEMA_TEXT = `{
       },
       "clarification"?: string        // only for ask_clarification
     }
-  ],
-  "type"?: "add_shape" | "clear_canvas" | "undo" | "ask_clarification", // allowed for simple single action
-  "shape"?: {
-    "type": "circle" | "ellipse" | "rect" | "line" | "polyline" | "polygon" | "arc" | "text",
-    "x": number, "y": number,
-    "radius"?: number,                // circle only
-    "startAngle"?: number, "endAngle"?: number, // arc only, degrees
-    "radiusX"?: number, "radiusY"?: number, // ellipse only
-    "width"?: number, "height"?: number, // rect only
-    "x1"?: number, "y1"?: number, "x2"?: number, "y2"?: number, // line only
-    "points"?: [{ "x": number, "y": number }], // polyline 2-10 points, polygon 3-8 points
-    "text"?: string, "fontSize"?: number, // text only
-    "fill"?: string, "stroke"?: string, "lineWidth"?: number
-  },
-  "clarification"?: string           // only for ask_clarification
+  ]
 }`
 
 // Parse command endpoint
@@ -97,26 +83,30 @@ ${OUTPUT_SCHEMA_TEXT}
 Rules:
 - Canvas size is 800x500 pixels.
 - For add_shape, always provide a "shape" object with at least "type".
-- Supported colors (hex): #ef4444 (red), #3b82f6 (blue), #22c55e (green), #eab308 (yellow), #111827 (black).
+- Supported colors (hex): #ef4444 (red), #3b82f6 (blue), #22c55e (green), #eab308 (yellow), #111827 (black), #f9fafb (white).
 - Use only these shape types: circle, ellipse, rect, line, polyline, polygon, arc, text.
-- polyline and arc are stroke-only shapes.
-- Arc angles are in degrees.
-- You can map common concepts to shapes: person=circle head+line/polyline body/arms/legs, sun=circle+line rays, tree=rect/polygon trunk+ellipse/circle crown+polyline branches, house=rect+polygon roof, face=circle+circle eyes+arc mouth, mountain=polyline, river=polyline/arc, cloud=multiple arcs/ellipses.
-- IMPORTANT: Do not ask the user which primitive shapes to use for common visible objects. People, faces, trees, houses, sun, clouds, mountains, rivers, flowers, cars, cats, and similar drawable objects MUST be decomposed by you.
-- Use ask_clarification only when the request is ambiguous, abstract, non-visual, or impossible to represent with the supported primitives.
+- polyline and arc are stroke-only shapes. Arc angles are in degrees.
+- You can map common concepts to shapes: person=circle head+line/polyline body/arms/legs, sun=circle+line rays, tree=rect/polygon trunk+ellipse/circle crown+polyline branches, house=rect+polygon roof, face=circle+circle eyes+arc mouth, mountain=polyline, river=polyline/arc, cloud=multiple arcs/ellipses, flower=circle center+ellipse petals, car=rect body+circle wheels, cat=circle face+polygon ears+line whiskers.
+- IMPORTANT: You MUST decompose ANY visible object into 2-8 primitives. Only use "type": "ask_clarification" for truly abstract/non-visual/paradoxical concepts (like "画幸福" or "画声音").
 
-=== Object Decomposition ===
-When the user describes an object or scene, follow these rules:
-1. DECOMPOSE complex objects into 3-8 semantic parts from [circle, ellipse, rect, line, polyline, polygon, arc, text].
-2. Main body FIRST (largest), details SECOND (smaller).
-3. Use POSITION to show relationship: eyes INSIDE face, roof ABOVE wall, rays AROUND center.
-4. Vary SIZES: main body bigger, details smaller.
-5. If you CANNOT decompose meaningfully after trying semantic parts, use ask_clarification.
-6. Never represent a complex object with only one primitive unless the user explicitly asks for that primitive shape.
-7. For people, animals, plants, buildings, or natural objects, identify semantic parts first, then map each part to primitives.
-8. Use polyline for open connected strokes such as arms, legs, branches, grass, mountains, roads, rivers, lightning, and paths.
-9. Use arc for curved strokes such as smiles, moons, cloud outlines, waves, and curved branches.
-10. For "小人" or "person", output head, body, two arms, and two legs as separate shapes. Do not ask for clarification.
+=== Object Decomposition (Three-Layer Strategy) ===
+
+Layer 1 - Confident Decomposition:
+- Objects you can confidently map: decompose into 2-8 semantic parts.
+- Main body FIRST (largest), details SECOND (smaller).
+- Use POSITION to show relationship: eyes INSIDE face, roof ABOVE wall, rays AROUND center.
+- Vary SIZES: main body bigger, details smaller.
+- Use polyline for open strokes: arms, legs, branches, grass, mountains, roads, rivers, lightning.
+- Use arc for curved strokes: smiles, moons, cloud outlines, waves, curved branches.
+
+Layer 2 - Best-Effort Guess:
+- Objects you are less sure about: STILL output your best-guess add_shape actions.
+- Use a rect as the main body and text with "(待修改)" label if you're uncertain.
+- NEVER return ask_clarification alone for a visible object.
+
+Layer 3 - Truly Unrepresentable:
+- Only for abstract concepts (emotions, sounds, etc.): use ask_clarification.
+- Visible physical objects MUST always result in at least one add_shape.
 
 === Composition ===
 - Do NOT place every object at canvas center (400, 250).
@@ -132,9 +122,9 @@ When the user describes an object or scene, follow these rules:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: text },
       ],
-      response_format: { type: 'json_object' },
+
       temperature: 0.3,
-      max_tokens: 800,
+      max_tokens: 1200,
     })
 
     const content = completion.choices[0]?.message?.content
@@ -146,14 +136,24 @@ When the user describes an object or scene, follow these rules:
 
     // Strip markdown fences if the model ignores the instruction
     const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    console.log('[LLM Raw]', content.slice(0, 300))
+    console.log('[LLM Cleaned Length]', cleaned.length)
 
     try {
       const parsed = JSON.parse(cleaned)
+      console.log('[LLM Response]', JSON.stringify(parsed).slice(0, 400))
       if (Array.isArray(parsed.actions)) {
         return res.json({ ok: true, actions: parsed.actions })
       }
-      return res.json({ ok: true, action: parsed })
-    } catch {
+      // Fallback: wrap bare single-action response in actions array
+      if (parsed.type) {
+        console.log('[LLM Warning] Model returned single action instead of actions array. Type:', parsed.type)
+        return res.json({ ok: true, actions: [parsed] })
+      }
+      return res.json({ ok: false, error: 'LLM returned no actions array', raw: cleaned.slice(0, 200) })
+    } catch (e) {
+      console.log('[LLM Parse Error]', String(e))
+      console.log('[LLM Full Content]', cleaned)
       return res.json({ ok: false, error: 'Invalid JSON response from LLM', raw: cleaned.slice(0, 200) })
     }
   } catch (error) {

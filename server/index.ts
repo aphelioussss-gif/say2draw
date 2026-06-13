@@ -102,7 +102,8 @@ Rules:
 - polyline and arc are stroke-only shapes.
 - Arc angles are in degrees.
 - You can map common concepts to shapes: person=circle head+line/polyline body/arms/legs, sun=circle+line rays, tree=rect/polygon trunk+ellipse/circle crown+polyline branches, house=rect+polygon roof, face=circle+circle eyes+arc mouth, mountain=polyline, river=polyline/arc, cloud=multiple arcs/ellipses.
-- IMPORTANT: If the command mentions a real-world object that does NOT map to clear circle/ellipse/rect/line/polyline/polygon/arc/text shapes, you MUST use "type": "ask_clarification" with a Chinese message asking what shape to use.
+- IMPORTANT: Do not ask the user which primitive shapes to use for common visible objects. People, faces, trees, houses, sun, clouds, mountains, rivers, flowers, cars, cats, and similar drawable objects MUST be decomposed by you.
+- Use ask_clarification only when the request is ambiguous, abstract, non-visual, or impossible to represent with the supported primitives.
 
 === Object Decomposition ===
 When the user describes an object or scene, follow these rules:
@@ -110,11 +111,12 @@ When the user describes an object or scene, follow these rules:
 2. Main body FIRST (largest), details SECOND (smaller).
 3. Use POSITION to show relationship: eyes INSIDE face, roof ABOVE wall, rays AROUND center.
 4. Vary SIZES: main body bigger, details smaller.
-5. If you CANNOT decompose meaningfully, use ask_clarification.
+5. If you CANNOT decompose meaningfully after trying semantic parts, use ask_clarification.
 6. Never represent a complex object with only one primitive unless the user explicitly asks for that primitive shape.
 7. For people, animals, plants, buildings, or natural objects, identify semantic parts first, then map each part to primitives.
 8. Use polyline for open connected strokes such as arms, legs, branches, grass, mountains, roads, rivers, lightning, and paths.
 9. Use arc for curved strokes such as smiles, moons, cloud outlines, waves, and curved branches.
+10. For "小人" or "person", output head, body, two arms, and two legs as separate shapes. Do not ask for clarification.
 
 === Composition ===
 - Do NOT place every object at canvas center (400, 250).

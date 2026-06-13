@@ -2,7 +2,7 @@ import type { DrawingAction } from './actions'
 
 function extractDrawingTarget(rawText: string): string | null {
   const normalized = rawText.replace(/\s+/g, '')
-  const match = normalized.match(/(?:给我|帮我|请)?(?:画|绘制)(.+?)(?:[，。,.！!？?]|$)/)
+  const match = normalized.match(/(?:请你|你)?(?:给我|帮我|请)?(?:画|绘制)(.+?)(?:吧|[，。,.！!？?]|$)/)
   const target = match?.[1]
     .replace(/^(一个|一只|一棵|一座|一条|一朵|一片|个|只|棵|座|条|朵|片)/, '')
     .trim()

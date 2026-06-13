@@ -24,6 +24,11 @@ import { parseSketchXML } from './sketch/sketchParser'
 import { fitBezierCurve } from './sketch/bezierFitter'
 import { gridToPixel } from './sketch/svgRenderer'
 import { captureCanvas } from './sketch/canvasCapture'
+import {
+  parseLocalAdjustment,
+  applyLocalAdjustment,
+  getAdjustmentFeedback,
+} from './domain/sketchTransform'
 import type { RenderedStroke, RawStroke, BezierSegment, ControlPoint } from './sketch/types'
 import {
   type AppPage,
@@ -559,8 +564,11 @@ function App() {
       }
 
       // Sketch modifier routing: sketch mode only
-      if (sketchMode !== null && /^(长一点|长一些|加长|短一点|短一些|缩短|大一点|大一些|放大|小一点|小一些|缩小|往左|往右|往上|往下|颜色改|改颜色|重来|就这样|可以了|好了|算了|不画了)/.test(transcript.trim())) {
-        if (/^(就这样|可以了|好了|算了|不画了)/.test(transcript.trim())) {
+      if (sketchMode !== null) {
+        const trimmed = transcript.trim()
+
+        // 1. Exit commands
+        if (/^(就这样|可以了|好了|算了|不画了)/.test(trimmed)) {
           setSketchMode(null)
           setFeedbackMessage('好的，草图已确认')
           speechFeedback.speak('好的，草图已确认', {
@@ -570,8 +578,28 @@ function App() {
           })
           return
         }
-        handleSketchEdit(transcript)
-        return
+
+        // 2. Local deterministic adjustments (move/scale/color) — no LLM
+        const localAdj = parseLocalAdjustment(trimmed)
+        if (localAdj) {
+          setSketchStrokes((prev) => applyLocalAdjustment(prev, localAdj))
+          const feedback = getAdjustmentFeedback(localAdj)
+          setFeedbackMessage(feedback)
+          speechFeedback.speak(feedback, {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+
+        // 3. Other sketch-mode edits that need LLM (loose match anywhere in transcript)
+        if (/长一点|长一些|加长|短一点|短一些|缩短|重来/.test(trimmed)) {
+          handleSketchEdit(transcript)
+          return
+        }
+
+        // 4. Falls through to routeCommands (may route to handleGenerateSketch → handleSketchEdit)
       }
 
       setFeedbackMessage('思考中...')

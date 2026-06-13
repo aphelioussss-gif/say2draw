@@ -43,7 +43,8 @@ function renderStrokeGroup(stroke: RenderedStroke, index: number, strokeWidth: n
     .filter(Boolean)
     .join('\n    ')
 
-  return `<g id="s${index + 1}" stroke="#111827" stroke-width="${strokeWidth}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.92">
+  const color = stroke.color || '#111827'
+  return `<g id="s${index + 1}" stroke="${color}" stroke-width="${strokeWidth}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.92">
     ${paths}
   </g>`
 }

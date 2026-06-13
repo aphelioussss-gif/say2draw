@@ -9,7 +9,7 @@ type VoicePanelProps = {
   finalTranscript: string
   errorMessage: string
   isSupported: boolean
-  commandExamples: string[]
+  commandExamples: { label: string; text: string }[]
   systemCommands: string[]
   onPauseListening: () => void
   onResumeListening: () => void
@@ -162,15 +162,12 @@ export function VoicePanel({
         </p>
       </section>
 
-      <section className="voice-card">
-        <p className="label">系统反馈</p>
-        <p className={`content ${errorMessage ? 'error-text' : ''}`}>
-          {errorMessage ||
-            (isSupported
-              ? 'PR 6 已将语音指令接入本地解析器和画布执行。'
-              : '建议使用 Chrome 打开本项目。')}
-        </p>
-      </section>
+      {errorMessage && (
+        <section className="voice-card">
+          <p className="label">识别异常</p>
+          <p className="content error-text">{errorMessage}</p>
+        </section>
+      )}
 
       <FeedbackPanel
         message={feedbackMessage}
@@ -326,10 +323,13 @@ export function VoicePanel({
       </section>
 
       <section className="demo-prompts" aria-label="Demo command examples">
-        <p className="label">试着说</p>
+        <p className="label">试着说（语音输入以下任一场景）</p>
         <ul>
-          {commandExamples.map((command) => (
-            <li key={command}>{command}</li>
+          {commandExamples.map((cmd) => (
+            <li key={cmd.text}>
+              <span className="scene-label">{cmd.label}</span>
+              {cmd.text}
+            </li>
           ))}
         </ul>
       </section>

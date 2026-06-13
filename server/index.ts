@@ -40,14 +40,19 @@ function getOpenAIClient(): OpenAI | null {
 
 const GRID_RES = 50
 
-const SKETCH_SYSTEM_PROMPT = `You are an expert sketch artist who draws with pen strokes. Your sketches should look hand-drawn, with natural line variation — never mechanically perfect.
+const SKETCH_SYSTEM_PROMPT = `You are an expert sketch artist specializing in minimal hand-drawn line art. Your sketches are clean, readable, and communication-focused — like whiteboard drawings or notebook doodles, not fine art.
 
-You draw on a numbered grid. The grid has numbers 1 to ${GRID_RES} along the bottom (x axis) and numbers 1 to ${GRID_RES} along the left edge (y axis). Each cell is uniquely identified by x and y numbers (e.g., the bottom-left cell is 'x1y1', the top-right is 'x${GRID_RES}y${GRID_RES}').
+You draw on a numbered grid: 1 to ${GRID_RES} along the bottom (x) and 1 to ${GRID_RES} along the left (y). Bottom-left is 'x1y1', top-right is 'x${GRID_RES}y${GRID_RES}'.
 
-=== How to specify strokes ===
-A sketch is a sequence of strokes. For each stroke, you specify:
-- <points>: a list of cell coordinates the stroke passes through
-- <t_values>: timing values 0.0 to 1.0 that define the progression of the curve
+=== Six-Color Palette ===
+You may use ONLY these six colors for strokes. Default is black (#111827).
+  - black:  #111827
+  - red:    #ef4444
+  - blue:   #3b82f6
+  - green:  #22c55e
+  - yellow: #eab308
+  - white:  #f9fafb
+Specify color per stroke with an optional <color> tag: <color>#ef4444</color>. Omit it for black.
 
 === Stroke primitives ===
 
@@ -55,15 +60,11 @@ Curve (smooth, 4+ points):
 Points = ['x8y6', 'x6y7', 'x6y10', 'x8y11']
 t_values = [0.00, 0.30, 0.80, 1.00]
 
-Large circle (9 points approximately evenly spaced):
+Circle (7-12 points):
 Points = ['x25y44', 'x32y41', 'x35y35', 'x31y29', 'x25y27', 'x19y29', 'x15y35', 'x18y41', 'x25y44']
 t_values = [0.00, 0.125, 0.25, 0.375, 0.50, 0.625, 0.75, 0.875, 1.00]
 
-Small circle (use fewer points but still approximate):
-Points = ['x30y40', 'x33y37', 'x33y33', 'x30y30', 'x27y33', 'x27y37', 'x30y40']
-t_values = [0.00, 0.17, 0.33, 0.50, 0.67, 0.83, 1.00]
-
-Corner (sharp angle — repeat the corner point with adjacent t_values):
+Corner (sharp angle — repeat corner point with adjacent t_values):
 Points = ['x13y27', 'x18y37', 'x18y37', 'x24y27']
 t_values = [0.00, 0.55, 0.50, 1.00]
 
@@ -71,52 +72,41 @@ Rectangle (4 corners, each repeated):
 Points = ['x13y27', 'x24y27', 'x24y27', 'x24y11', 'x24y11', 'x13y11', 'x13y11', 'x13y27']
 t_values = [0.00, 0.30, 0.25, 0.50, 0.50, 0.75, 0.75, 1.00]
 
-Triangle (3 corners):
+Triangle:
 Points = ['x10y29', 'x15y33', 'x15y33', 'x9y35']
 t_values = [0.00, 0.55, 0.50, 1.00]
-Then close with a line: Points = ['x9y35', 'x10y29'], t_values = [0.00, 1.00]
+Close: Points = ['x9y35', 'x10y29'], t_values = [0.00, 1.00]
 
 Straight line:
 Points = ['x18y31', 'x35y14']
 t_values = [0.00, 1.00]
 
-Single dot:
-Points = ['x25y25']
-t_values = [0.00]
-
-=== Hand-drawn quality ===
-- Add small offsets (±0.3 to ±0.5 grid units) to coordinates for a natural hand-drawn feel
-- Circles should NOT be perfectly round — use 7-12 points with slight irregularity
-- Rectangles should have slightly uneven edges — corners should not be exactly 90 degrees
-- Lines should have a subtle wobble — add 1-2 intermediate points offset by ±0.3 grid units
-- Text/characters should be drawn as short connected strokes imitating handwriting
-- Long strokes should be split into multiple shorter segments
+=== Style rules ===
+- Clean, minimal line art. No shading, no fill, no textures.
+- Clear outlines with the fewest strokes needed for recognition.
+- Whiteboard / notebook style: slight natural irregularity, but intentionally readable.
+- Do NOT add random wobbles, decorative strokes, or overly long stray lines.
+- Long strokes should be split into connected shorter segments.
+- Text/characters: short connected handwriting strokes.
 
 === Composition ===
-- 9 canvas zones (grid coords x/y = 1→50):
-  center (x20-30,y20-30)  top (x20-30,y32-42)  bottom (x20-30,y8-18)
-  left (x6-16,y20-30)  right (x34-44,y20-30)
-  topLeft (x6-16,y32-42)  topRight (x34-44,y32-42)
-  bottomLeft (x6-16,y8-18)  bottomRight (x34-44,y8-18)
-- Place the main object in the zone requested by the user. Default to center if no zone specified.
-- For one requested object, keep the whole object inside x8..x42 and y8..y42.
-- Center the main object near x25y25. Do not let ears, whiskers, tails, rays, or limbs touch the canvas edge.
-- Use compact proportions: one main body/head, then small attached details.
-- Do not make decorative lines longer than the main body unless the object clearly requires it.
-- Use 6-14 strokes for a simple object. Avoid messy over-sketching.
-- For animals, draw recognizable anatomy: head/body first, ears/legs/tail second, face details last.
-- Larger/more important elements first, details second
-- Leave breathing room between elements
+- Place objects in the zone requested by the user. Default to center if no zone specified.
+- Keep objects inside x8..x42 and y8..y42.
+- Use 4-20 strokes per object. Simple objects use fewer; complex objects use more.
+- Draw main body first, then attached details (ears, legs, tail, face).
+- Larger elements first, smaller details second.
+- Leave breathing room between elements.
 
 === Output format ===
-Output ONLY in XML format. NO markdown code fences.
+Output ONLY in XML. NO markdown fences.
 
-<thinking>Briefly describe your drawing strategy: what parts to draw, the order, and their placement on the grid.</thinking>
+<thinking>Brief drawing strategy: parts, order, placement, colors.</thinking>
 <strokes>
   <s1>
-    <points>'x...y...', 'x...y...', ...</points>
-    <t_values>0.00, 0.30, ...</t_values>
-    <id>short descriptive label</id>
+    <points>'x...y...', ...</points>
+    <t_values>0.00, ...</t_values>
+    <id>description</id>
+    <color>#ef4444</color>  <!-- optional, omit for black -->
   </s1>
 </strokes>`
 
@@ -227,7 +217,370 @@ const SKETCH_CAT_EXAMPLE = `<example>
 </strokes>
 </example>`
 
-function buildSketchUserPrompt(concept: string, zone?: string | null): string {
+const SKETCH_PLAN_PROMPT = `You are a drawing planner for a voice-controlled sketch tool. Your job is to analyze what the user wants to draw and produce a structured plan BEFORE any drawing happens.
+
+The tool draws minimal hand-drawn line art using only six colors: black (#111827), red (#ef4444), blue (#3b82f6), green (#22c55e), yellow (#eab308), white (#f9fafb).
+
+Given the user's spoken command, output a JSON plan:
+{
+  "sceneType": "quick_sketch" | "whiteboard" | "story_scene" | "teaching_diagram",
+  "previewText": "short Chinese sentence describing what will be drawn",
+  "layoutBrief": "Chinese composition brief with positions, scale, spacing, and relationship between elements",
+  "styleBrief": "Chinese visual style brief for recognizable minimal line art",
+  "elements": [{
+    "name": "Chinese name of the element",
+    "position": "Chinese position description (中间/左上角/右边/下面 etc.)",
+    "color": "#111827" | "#ef4444" | "#3b82f6" | "#22c55e" | "#eab308" | "#f9fafb",
+    "role": "main" | "supporting" | "label",
+    "details": ["2-4 concrete drawable details, e.g. 弯月弧线, 长头发, 裙摆, 星星"]
+  }],
+  "drawingOrder": ["element names in order"],
+  "detailChecklist": ["3-6 concrete details that must appear in the sketch"],
+  "avoid": ["2-4 mistakes to avoid"],
+  "polishHints": ["3-5 natural Chinese refinement commands the user can say after drawing"]
+}
+
+Rules:
+- Default color is black (#111827). Only use other colors when the user explicitly mentions them.
+- If the user says an unsupported color (e.g., purple, orange), map it to the nearest palette color.
+- Do not make a shallow plan. Split scenes into multiple drawable elements.
+- Include concrete visible details that help the sketch stay recognizable.
+- Keep previewText concise (one sentence, under 30 Chinese characters).
+- Output ONLY the JSON object. No markdown fences. No extra text.`
+
+type SketchPlan = {
+  sceneType: 'quick_sketch' | 'whiteboard' | 'story_scene' | 'teaching_diagram'
+  previewText: string
+  layoutBrief: string
+  styleBrief: string
+  elements: Array<{
+    name: string
+    position: string
+    color: string
+    role: 'main' | 'supporting' | 'label'
+    details: string[]
+  }>
+  drawingOrder: string[]
+  detailChecklist: string[]
+  avoid: string[]
+  polishHints: string[]
+}
+
+const PLAN_COLORS = new Set(['#111827', '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#f9fafb'])
+
+function extractJsonObjects(text: string): string[] {
+  const candidates: string[] = []
+  let depth = 0
+  let start = -1
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      continue
+    }
+
+    if (char === '{') {
+      if (depth === 0) start = i
+      depth += 1
+      continue
+    }
+
+    if (char === '}') {
+      depth -= 1
+      if (depth === 0 && start >= 0) {
+        candidates.push(text.slice(start, i + 1))
+        start = -1
+      }
+      if (depth < 0) {
+        depth = 0
+        start = -1
+      }
+    }
+  }
+
+  return candidates
+}
+
+function normalizePlan(value: unknown, originalText: string): SketchPlan | null {
+  if (!value || typeof value !== 'object') return null
+
+  const data = value as Record<string, unknown>
+  const rawElements = Array.isArray(data.elements) ? data.elements : []
+  const elements = rawElements
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item, index) => {
+      const color = typeof item.color === 'string' && PLAN_COLORS.has(item.color)
+        ? item.color
+        : '#111827'
+      const role = item.role === 'supporting' || item.role === 'label' ? item.role : 'main'
+      return {
+        name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : `元素${index + 1}`,
+        position: typeof item.position === 'string' && item.position.trim() ? item.position.trim() : '中间',
+        color,
+        role,
+        details: normalizeStringArray(item.details, []),
+      }
+    })
+
+  const fallbackName = originalText.replace(/^(请)?画(一个|一只|一幅|一下)?/, '').trim() || originalText
+  const safeElements = elements.length > 0
+    ? elements
+    : [{
+        name: fallbackName,
+        position: '中间',
+        color: '#111827',
+        role: 'main' as const,
+        details: ['清晰轮廓', '关键特征'],
+      }]
+
+  const sceneTypes = new Set(['quick_sketch', 'whiteboard', 'story_scene', 'teaching_diagram'])
+  const sceneType = typeof data.sceneType === 'string' && sceneTypes.has(data.sceneType)
+    ? data.sceneType as SketchPlan['sceneType']
+    : inferSceneType(originalText)
+
+  return {
+    sceneType,
+    previewText: typeof data.previewText === 'string' && data.previewText.trim()
+      ? data.previewText.trim().slice(0, 40)
+      : buildFallbackPreview(originalText),
+    layoutBrief: typeof data.layoutBrief === 'string' && data.layoutBrief.trim()
+      ? data.layoutBrief.trim()
+      : buildFallbackLayoutBrief(safeElements),
+    styleBrief: typeof data.styleBrief === 'string' && data.styleBrief.trim()
+      ? data.styleBrief.trim()
+      : '用干净的手绘线条表达主体，减少无意义笔画，保证每个元素可辨认。',
+    elements: safeElements,
+    drawingOrder: Array.isArray(data.drawingOrder) && data.drawingOrder.every((item) => typeof item === 'string')
+      ? data.drawingOrder as string[]
+      : safeElements.map((item) => item.name),
+    detailChecklist: normalizeStringArray(data.detailChecklist, safeElements.flatMap((item) => item.details).slice(0, 6)),
+    avoid: normalizeStringArray(data.avoid, ['不要把所有元素堆在一起', '不要省略主体的关键特征']),
+    polishHints: Array.isArray(data.polishHints) && data.polishHints.every((item) => typeof item === 'string')
+      ? (data.polishHints as string[]).slice(0, 5)
+      : buildFallbackPolishHints(originalText),
+  }
+}
+
+function normalizeStringArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return fallback
+  const items = value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+  return items.length > 0 ? items : fallback
+}
+
+function parseSketchPlan(content: string, originalText: string): SketchPlan | null {
+  const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+  const candidates = extractJsonObjects(cleaned)
+
+  for (const candidate of candidates.reverse()) {
+    try {
+      const plan = normalizePlan(JSON.parse(candidate), originalText)
+      if (plan) return plan
+    } catch {
+      // Try the next candidate. Some models echo example JSON before the real answer.
+    }
+  }
+
+  try {
+    return normalizePlan(JSON.parse(cleaned), originalText)
+  } catch {
+    return null
+  }
+}
+
+function inferSceneType(text: string): SketchPlan['sceneType'] {
+  if (/流程|步骤|箭头|关系|图/.test(text)) return 'whiteboard'
+  if (/绕|表示|解释|讲解|课堂/.test(text)) return 'teaching_diagram'
+  if (/站|坐|下面|旁边|故事|场景/.test(text)) return 'story_scene'
+  return 'quick_sketch'
+}
+
+function buildFallbackPreview(text: string): string {
+  const subject = text.replace(/^(请)?画(一个|一只|一幅|一下)?/, '').trim() || text
+  return `将绘制${subject}`.slice(0, 40)
+}
+
+function buildFallbackLayoutBrief(elements: SketchPlan['elements']): string {
+  return elements
+    .map((element) => `${element.name}放在${element.position}`)
+    .join('，') || '主体放在画布中间，保持元素之间有留白。'
+}
+
+function buildFallbackPolishHints(text: string): string[] {
+  if (/月亮|女孩/.test(text)) {
+    return ['月亮更弯一点', '给女孩加头发', '加两颗星星', '女孩小一点']
+  }
+  if (/流程|步骤/.test(text)) {
+    return ['箭头更明显', '节点分开一点', '加上文字标签']
+  }
+  if (/太阳|树/.test(text)) {
+    return ['太阳放右上角', '树大一点', '加一条地平线']
+  }
+  return ['轮廓更清楚', '加一点细节', '主体放大一点']
+}
+
+function createFallbackPlan(text: string): SketchPlan {
+  const subject = text.replace(/^(请)?画(一个|一只|一幅|一下)?/, '').trim() || text
+  const elements = inferFallbackElements(text, subject)
+  return {
+    sceneType: inferSceneType(text),
+    previewText: buildFallbackPreview(text),
+    layoutBrief: buildFallbackLayoutBrief(elements),
+    styleBrief: '用极简手绘线条，先画主体轮廓，再补关键细节。',
+    elements,
+    drawingOrder: elements.map((element) => element.name),
+    detailChecklist: elements.flatMap((element) => element.details).slice(0, 6),
+    avoid: ['不要只画抽象符号', '不要把元素挤在同一个位置'],
+    polishHints: buildFallbackPolishHints(text),
+  }
+}
+
+function inferFallbackElements(text: string, subject: string): SketchPlan['elements'] {
+  const elements: SketchPlan['elements'] = []
+
+  if (/月亮/.test(text)) {
+    elements.push({
+      name: '月亮',
+      position: /下面|下方/.test(text) ? '上方' : '右上角',
+      color: '#111827',
+      role: 'supporting',
+      details: ['弯月外弧', '弯月内弧', '留出月牙厚度'],
+    })
+  }
+
+  if (/女孩|小女孩|人物|人/.test(text)) {
+    elements.push({
+      name: /小女孩/.test(text) ? '小女孩' : '人物',
+      position: /月亮/.test(text) && /下面|下方/.test(text) ? '下方' : '中间',
+      color: '#111827',
+      role: 'main',
+      details: ['圆形头部', '头发', '裙子或身体', '两条腿'],
+    })
+  }
+
+  if (/太阳/.test(text)) {
+    elements.push({
+      name: '太阳',
+      position: /左/.test(text) ? '左上角' : '右上角',
+      color: /红/.test(text) ? '#ef4444' : '#eab308',
+      role: 'supporting',
+      details: ['圆形太阳', '短射线'],
+    })
+  }
+
+  if (/树/.test(text)) {
+    elements.push({
+      name: '树',
+      position: /下面|下方/.test(text) ? '下方' : '左边',
+      color: /绿/.test(text) ? '#22c55e' : '#111827',
+      role: 'main',
+      details: ['树干', '树冠', '地面连接'],
+    })
+  }
+
+  if (elements.length > 0) return elements
+
+  return [{
+    name: subject,
+    position: /下面|下方/.test(text) ? '下方' : '中间',
+    color: '#111827',
+    role: 'main',
+    details: ['清晰轮廓', '关键特征'],
+  }]
+}
+
+function reviseFallbackPlan(plan: SketchPlan, revision: string): SketchPlan {
+  const priorityDetails: string[] = []
+  const next: SketchPlan = {
+    ...plan,
+    elements: plan.elements.map((element) => ({ ...element, details: [...element.details] })),
+    detailChecklist: [...plan.detailChecklist],
+    avoid: [...plan.avoid],
+    polishHints: [...plan.polishHints],
+  }
+
+  if (/星星|星/.test(revision) && !next.elements.some((element) => element.name.includes('星'))) {
+    next.elements.push({
+      name: '星星',
+      position: '月亮周围',
+      color: '#eab308',
+      role: 'supporting',
+      details: ['两到三颗小星星', '分散在月亮附近'],
+    })
+    priorityDetails.push('两到三颗小星星', '分散在月亮附近')
+    next.drawingOrder.push('星星')
+  }
+
+  if (/弯|弯弯|月牙/.test(revision)) {
+    const moon = next.elements.find((element) => element.name.includes('月'))
+    if (moon) {
+      moon.details = mergeUnique(moon.details, ['更明显的月牙弧线', '内外两条弯曲弧线'])
+      priorityDetails.push('更明显的月牙弧线', '内外两条弯曲弧线')
+    }
+  }
+
+  if (/头发|辫子/.test(revision)) {
+    const person = next.elements.find((element) => /女孩|人物|人/.test(element.name))
+    if (person) {
+      const hairDetail = /辫子/.test(revision) ? '两条辫子' : '清楚的头发轮廓'
+      person.details = mergeUnique(person.details, [hairDetail])
+      priorityDetails.push(hairDetail)
+    }
+  }
+
+  if (/影子/.test(revision)) {
+    next.elements.push({
+      name: '影子',
+      position: '小女孩脚下',
+      color: '#111827',
+      role: 'supporting',
+      details: ['脚下短弧线阴影'],
+    })
+    priorityDetails.push('脚下短弧线阴影')
+    next.drawingOrder.push('影子')
+  }
+
+  if (/上|高一点/.test(revision)) {
+    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往上调整。`
+  } else if (/下|低一点/.test(revision)) {
+    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往下调整。`
+  } else if (/左/.test(revision)) {
+    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往左调整。`
+  } else if (/右/.test(revision)) {
+    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往右调整。`
+  }
+
+  next.detailChecklist = mergeUnique([
+    ...priorityDetails,
+    ...next.elements.flatMap((element) => element.details),
+    ...next.detailChecklist,
+  ], []).slice(0, 10)
+  next.polishHints = mergeUnique(['确认开始画', '再加一点细节', ...next.polishHints], []).slice(0, 5)
+  next.previewText = plan.previewText
+  return next
+}
+
+function mergeUnique(items: string[], extra: string[]): string[] {
+  return Array.from(new Set([...items, ...extra].filter(Boolean)))
+}
+
+function buildSketchUserPrompt(concept: string, zone?: string | null, approvedPlan?: object | null): string {
   const zoneGrid: Record<string, string> = {
     center:       '画布中央 (x20-30, y20-30)',
     top:          '画布上方 (x20-30, y32-42)',
@@ -242,7 +595,11 @@ function buildSketchUserPrompt(concept: string, zone?: string | null): string {
   const zoneHint = zone && zoneGrid[zone]
     ? `\n\n位置要求：请将主体放置在${zoneGrid[zone]}范围内。`
     : ''
-  return `You need to produce a hand-drawn sketch of: ${concept}${zoneHint}
+  const planHint = approvedPlan
+    ? `\n\n已批准的绘图计划（必须严格遵循）：${JSON.stringify(approvedPlan)}
+Draw every listed element as a separate recognizable part. Respect layoutBrief, styleBrief, detailChecklist, avoid, each element's details, position, and drawingOrder. If the plan describes a scene, do not collapse it into one symbol.`
+    : ''
+  return `You need to produce a clean hand-drawn line-art sketch of: ${concept}${zoneHint}${planHint}
 
 Here are examples of clean, bounded sketches using the format:
 
@@ -327,11 +684,120 @@ IMPORTANT: Output ONLY the strokes for the new element. The system will combine 
 // ============================================================
 
 /**
+ * POST /api/sketch-plan
+ * Generate a structured drawing plan before drawing.
+ */
+app.post('/api/sketch-plan', async (req, res) => {
+  const { text } = req.body
+
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Missing text parameter' })
+  }
+
+  const client = getOpenAIClient()
+  if (!client) {
+    return res.json({ ok: true, plan: createFallbackPlan(text), warning: 'LLM not configured; used fallback plan' })
+  }
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: getActiveModel(),
+      messages: [
+        { role: 'system', content: SKETCH_PLAN_PROMPT },
+        { role: 'user', content: text },
+      ],
+      temperature: 0.3,
+      max_tokens: 800,
+      // @ts-expect-error Mimo-specific
+      extra_body: { thinking: { type: "disabled" } },
+    })
+
+    const content = completion.choices[0]?.message?.content || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
+    if (!content) {
+      return res.json({ ok: false, error: 'No response from LLM' })
+    }
+
+    const plan = parseSketchPlan(content, text)
+    if (plan) {
+      return res.json({ ok: true, plan })
+    }
+
+    console.warn('[SketchPlan] Invalid JSON, using local fallback:', content.slice(0, 200))
+    return res.json({ ok: true, plan: createFallbackPlan(text), warning: 'Used fallback plan' })
+  } catch (error) {
+    console.error('[SketchPlan] API error:', error)
+    return res.json({ ok: true, plan: createFallbackPlan(text), warning: String(error).slice(0, 200) })
+  }
+})
+
+/**
+ * POST /api/sketch-plan/revise
+ * Revise a pending drawing plan from a follow-up voice instruction.
+ */
+app.post('/api/sketch-plan/revise', async (req, res) => {
+  const { plan, revision } = req.body
+
+  if (!plan || typeof plan !== 'object') {
+    return res.status(400).json({ ok: false, error: 'Missing plan parameter' })
+  }
+  if (!revision || typeof revision !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Missing revision parameter' })
+  }
+
+  const basePlan = normalizePlan(plan, revision)
+  if (!basePlan) {
+    return res.json({ ok: true, plan: createFallbackPlan(revision), warning: 'Invalid previous plan; used fallback plan' })
+  }
+
+  const client = getOpenAIClient()
+  if (!client) {
+    return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: 'LLM not configured; used fallback revision' })
+  }
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: getActiveModel(),
+      messages: [
+        { role: 'system', content: SKETCH_PLAN_PROMPT },
+        {
+          role: 'user',
+          content: `已有绘图计划：${JSON.stringify(basePlan)}
+
+用户新的语音修改意见：${revision}
+
+请输出修订后的完整 JSON plan。保留原计划中仍然有效的部分，吸收新的修改意见。`,
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 1200,
+      // @ts-expect-error Mimo-specific
+      extra_body: { thinking: { type: "disabled" } },
+    })
+
+    const content = completion.choices[0]?.message?.content || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
+    if (!content) {
+      return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: 'No response from LLM; used fallback revision' })
+    }
+
+    const revisedPlan = parseSketchPlan(content, revision)
+    if (revisedPlan) {
+      return res.json({ ok: true, plan: revisedPlan })
+    }
+
+    console.warn('[SketchPlanRevise] Invalid JSON, using fallback:', content.slice(0, 200))
+    return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: 'Used fallback revision' })
+  } catch (error) {
+    console.error('[SketchPlanRevise] API error:', error)
+    return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: String(error).slice(0, 200) })
+  }
+})
+
+/**
  * POST /api/sketch
  * Generate a hand-drawn sketch from text description via MiMo.
  */
 app.post('/api/sketch', async (req, res) => {
-  const { text, zone } = req.body
+  const { text, zone, approvedPlan } = req.body
 
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing text parameter' })
@@ -347,7 +813,7 @@ app.post('/api/sketch', async (req, res) => {
       model: getActiveModel(),
       messages: [
         { role: 'system', content: SKETCH_SYSTEM_PROMPT },
-        { role: 'user', content: buildSketchUserPrompt(text, typeof zone === 'string' ? zone : null) },
+        { role: 'user', content: buildSketchUserPrompt(text, typeof zone === 'string' ? zone : null, approvedPlan || null) },
       ],
       temperature: 0.3,
       max_tokens: 4000,

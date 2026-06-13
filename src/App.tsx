@@ -1,9 +1,9 @@
 import { useRef, useReducer, useState } from 'react'
 import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
-import { DevControls } from './components/DevControls'
 import { VoicePanel } from './components/VoicePanel'
 import { SketchLayer } from './components/SketchLayer'
+import { PlanCompanion } from './components/PlanCompanion'
 import { getActionFeedback, getBatchFeedback } from './domain/feedback'
 import {
   drawingReducer,
@@ -26,58 +26,15 @@ import './App.css'
 const GRID_RES = 50
 
 const commandExamples = [
-  '画一只猫',
-  '在左边画太阳和树',
-  '在右上角写上你好',
-  '长一点 · 往右移 · 就这样',
+  { label: '快速草图', text: '画一个红色太阳，下面有一棵绿色树' },
+  { label: '课堂讲解', text: '画太阳、地球和月亮，表示月亮绕地球转' },
+  { label: '流程白板', text: '画一个从登录到支付的流程图' },
+  { label: '故事场景', text: '画一个小女孩站在月亮下面' },
 ]
 
 const systemCommands = [
   '撤销',
   '清空画布',
-]
-
-const devShapeTemplates: Shape[] = [
-  {
-    id: 'template-circle',
-    type: 'circle',
-    x: 150,
-    y: 150,
-    radius: 58,
-    fill: '#fee2e2',
-    stroke: '#ef4444',
-    lineWidth: 4,
-  },
-  {
-    id: 'template-rect',
-    type: 'rect',
-    x: 500,
-    y: 92,
-    width: 170,
-    height: 116,
-    fill: '#dbeafe',
-    stroke: '#3b82f6',
-    lineWidth: 4,
-  },
-  {
-    id: 'template-line',
-    type: 'line',
-    x1: 190,
-    y1: 330,
-    x2: 610,
-    y2: 332,
-    stroke: '#22c55e',
-    lineWidth: 6,
-  },
-  {
-    id: 'template-text',
-    type: 'text',
-    x: 400,
-    y: 260,
-    text: '你好 Say2Draw',
-    fill: '#111827',
-    fontSize: 34,
-  },
 ]
 
 function getSketchPixelBounds(strokes: ControlPoint[][]) {
@@ -162,6 +119,7 @@ function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
     return {
       id: raw.id || `stroke-${i}`,
       segments: validSegments,
+      color: raw.color || '#111827',
     }
   }).filter((s) => s.segments.length > 0)
 }
@@ -169,7 +127,6 @@ function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
 function App() {
   const [state, dispatch] = useReducer(drawingReducer, initialDrawingState)
   const [feedbackMessage, setFeedbackMessage] = useState('')
-  const nextShapeIndexRef = useRef(0)
   const speechFeedback = useSpeechSynthesis()
   const llmStatus = useLLMStatus()
 
@@ -182,6 +139,21 @@ function App() {
   // TODO(PR19): add loading overlay when isGeneratingSketch is true
   const [, setIsGeneratingSketch] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // ---- Plan state (Plan→Confirm→Execute flow) ----
+  type PendingPlan = {
+    originalText: string
+    sceneType?: string
+    previewText: string
+    layoutBrief?: string
+    styleBrief?: string
+    polishHints: string[]
+    drawingOrder?: string[]
+    detailChecklist?: string[]
+    avoid?: string[]
+    elements: Array<{ name: string; position: string; color: string; role: string; details?: string[] }>
+  }
+  const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null)
 
   // ---- Helpers ----
 
@@ -301,7 +273,7 @@ function App() {
     return shiftShapePixels(shape, cx - center.cx, cy - center.cy)
   }
 
-  // ---- Sketch generation ----
+  // ---- Sketch generation (Plan→Confirm→Execute) ----
 
   async function handleGenerateSketch(rawText: string) {
     // If sketch already exists on canvas, route to multimodal edit (accumulation)
@@ -315,40 +287,134 @@ function App() {
       handleSketchEdit(`${zoneHint}${rawText}`, true)
       return
     }
+
+    // No existing sketch: Plan→Confirm→Execute
     setIsGeneratingSketch(true)
-    setFeedbackMessage('正在绘制草图...')
-    speechFeedback.speak('正在绘制草图...', {
-      onEnd: () => { /* keep waiting for API response */ },
-    })
+    setFeedbackMessage('正在生成绘图计划...')
 
     try {
-      const zone = extractSpatialZone(rawText)
+      const res = await fetch('/api/sketch-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: rawText }),
+      })
+      const data = await res.json()
+
+      if (data.ok && data.plan) {
+        setPendingPlan({ ...data.plan, originalText: rawText })
+        const preview = data.plan.previewText || '已生成绘图计划'
+        const hints = data.plan.polishHints?.length
+          ? `。画完后可以说：${data.plan.polishHints.slice(0, 2).join('、')}`
+          : ''
+        const message = `${preview}。可以说确认开始画，取消重来，也可以继续说你想怎么改。${hints}`
+        setFeedbackMessage(message)
+        speechFeedback.speak(message, {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+        return
+      }
+
+      setFeedbackMessage('计划生成失败，请重试')
+      speechFeedback.speak('计划生成失败，请重试', {
+        onEnd: () => {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+        },
+      })
+    } catch {
+      setFeedbackMessage('网络错误，请重试')
+      speechFeedback.speak('网络错误，请重试', {
+        onEnd: () => {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+        },
+      })
+    } finally {
+      setIsGeneratingSketch(false)
+    }
+  }
+
+  async function revisePendingPlan(revision: string) {
+    if (!pendingPlan) return
+
+    const currentPlan = pendingPlan
+    setIsGeneratingSketch(true)
+    setFeedbackMessage('正在调整绘图计划...')
+
+    try {
+      const res = await fetch('/api/sketch-plan/revise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: currentPlan, revision }),
+      })
+      const data = await res.json()
+
+      if (data.ok && data.plan) {
+        const revisedPlan = { ...data.plan, originalText: currentPlan.originalText }
+        setPendingPlan(revisedPlan)
+        const message = `${data.plan.previewText || '计划已更新'}。已按你的意见调整，确认就开始画，也可以继续修改。`
+        setFeedbackMessage(message)
+        speechFeedback.speak(message, {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+        return
+      }
+
+      setFeedbackMessage('计划调整失败，请换一种说法')
+      speechFeedback.speak('计划调整失败，请换一种说法', {
+        onEnd: () => {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+        },
+      })
+    } catch {
+      setFeedbackMessage('网络错误，请重试')
+      speechFeedback.speak('网络错误，请重试', {
+        onEnd: () => {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+        },
+      })
+    } finally {
+      setIsGeneratingSketch(false)
+    }
+  }
+
+  async function executeApprovedPlan() {
+    if (!pendingPlan) return
+    setIsGeneratingSketch(true)
+    setFeedbackMessage('正在绘制...')
+    const plan = pendingPlan
+    setPendingPlan(null)
+
+    try {
+      const zone = extractSpatialZone(plan.originalText)
       const res = await fetch('/api/sketch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: rawText, zone }),
+        body: JSON.stringify({ text: plan.originalText, zone, approvedPlan: plan }),
       })
       const data = await res.json()
 
       if (data.ok && data.sketch) {
-        console.log('[Sketch] Response received, length:', data.sketch.length)
         const parsed = parseSketchXML(data.sketch, GRID_RES)
-        console.log('[Sketch] Parsed:', parsed ? `${parsed.strokes.length} strokes` : 'NULL')
         if (parsed && parsed.strokes.length > 0) {
           const rendered = fitAndRenderStrokes(parsed.strokes)
-          console.log('[Sketch] Rendered:', rendered.length, 'renderable strokes')
           setSketchStrokes(rendered)
           setSketchMode({ concept: parsed.concept, rawStrokes: parsed.strokes })
 
           dispatch({
             type: 'generate_sketch',
-            rawText,
+            rawText: plan.originalText,
             parseSource: 'llm',
             createdAt: createTimestamp(),
             message: `Generated sketch: ${parsed.concept}`,
           })
 
-          const message = `已为你画了${parsed.concept}的草图`
+          const polish = plan.polishHints?.length
+            ? ` 可以继续说：${plan.polishHints.slice(0, 3).join('、')}`
+            : ''
+          const message = `已为你画了${parsed.concept}的草图。${polish}`
           setFeedbackMessage(message)
           speechFeedback.speak(message, {
             onEnd: () => {
@@ -359,8 +425,7 @@ function App() {
         }
       }
 
-      // Log failure details for debugging
-      console.warn('[Sketch] Generation failed:', { rawText, zone, ok: data.ok, hasSketch: !!data.sketch, error: data.error })
+      console.warn('[Sketch] Execution failed:', { ok: data.ok, hasSketch: !!data.sketch, error: data.error })
       setFeedbackMessage('草图生成失败，请重试')
       speechFeedback.speak('草图生成失败，请重试', {
         onEnd: () => {
@@ -450,6 +515,26 @@ function App() {
     shouldIgnoreResult: () => speechFeedback.isSpeaking,
     onFinalTranscript: (transcript) => {
       speech.pauseListening()
+
+      // Plan confirmation routing: confirm or cancel a pending plan
+      if (pendingPlan !== null) {
+        if (/^(确认|开始画|可以|就这样|画吧|好|行)/.test(transcript.trim())) {
+          executeApprovedPlan()
+          return
+        }
+        if (/^(取消|算了|重来|不要)/.test(transcript.trim())) {
+          setPendingPlan(null)
+          setFeedbackMessage('好的，已取消。请重新描述你想画的内容。')
+          speechFeedback.speak('好的，已取消。请重新描述你想画的内容。', {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+        revisePendingPlan(transcript)
+        return
+      }
 
       // Sketch modifier routing: sketch mode only
       if (sketchMode !== null && /^(长一点|长一些|加长|短一点|短一些|缩短|大一点|大一些|放大|小一点|小一些|缩小|往左|往右|往上|往下|颜色改|改颜色|重来|就这样|可以了|好了|算了|不画了)/.test(transcript.trim())) {
@@ -582,6 +667,7 @@ function App() {
           dispatch(action)
           setSketchStrokes([])
           setSketchMode(null)
+          setPendingPlan(null)
           return false // let caller handle feedback
         }
 
@@ -590,6 +676,7 @@ function App() {
           if (sketchStrokes.length > 0) {
             setSketchStrokes([])
             setSketchMode(null)
+            setPendingPlan(null)
             setFeedbackMessage('已撤销草图')
             speechFeedback.speak('已撤销草图', {
               onEnd: () => {
@@ -606,54 +693,6 @@ function App() {
       }
     },
   })
-
-  function handleAddShape() {
-    const index = nextShapeIndexRef.current
-    const template = devShapeTemplates[index % devShapeTemplates.length]
-    const shape = {
-      ...template,
-      id: `dev-${template.type}-${index}`,
-    }
-
-    nextShapeIndexRef.current += 1
-
-    dispatch({
-      type: 'add_shape',
-      shape,
-      rawText: `DEV add ${shape.type}`,
-      parseSource: 'dev',
-      createdAt: createTimestamp(),
-    })
-    setFeedbackMessage('已添加开发测试图形')
-  }
-
-  function handleClearCanvas() {
-    dispatch({
-      type: 'clear_canvas',
-      rawText: 'DEV clear canvas',
-      parseSource: 'dev',
-      createdAt: createTimestamp(),
-    })
-    setSketchStrokes([])
-    setSketchMode(null)
-    setFeedbackMessage('已清空画布')
-  }
-
-  function handleUndo() {
-    if (sketchStrokes.length > 0) {
-      setSketchStrokes([])
-      setSketchMode(null)
-      setFeedbackMessage('已撤销草图')
-      return
-    }
-    dispatch({
-      type: 'undo',
-      rawText: 'DEV undo',
-      parseSource: 'dev',
-      createdAt: createTimestamp(),
-    })
-    setFeedbackMessage('已撤销上一步')
-  }
 
   return (
     <main className="app-shell" aria-label="Say2Draw application scaffold">
@@ -697,17 +736,12 @@ function App() {
               width={CANVAS_WIDTH}
               height={CANVAS_HEIGHT}
             />
-            <DevControls
-              shapes={state.shapes}
-              canUndo={state.past.length > 0 || sketchStrokes.length > 0}
-              onAddShape={handleAddShape}
-              onClearCanvas={handleClearCanvas}
-              onUndo={handleUndo}
-            />
           </div>
         </section>
 
         <aside className="history-panel" aria-label="Command history">
+          <PlanCompanion plan={pendingPlan} />
+
           <div className="panel-heading">
             <h2>Command History</h2>
           </div>

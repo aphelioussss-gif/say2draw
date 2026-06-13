@@ -9,11 +9,17 @@ const DEFAULT_STROKE = '#1f2937'
 const DEFAULT_FILL = 'transparent'
 const DEFAULT_LINE_WIDTH = 3
 
+function degreesToRadians(degrees: number) {
+  return (degrees * Math.PI) / 180
+}
+
 function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
   ctx.save()
   ctx.lineWidth = shape.lineWidth ?? DEFAULT_LINE_WIDTH
   ctx.strokeStyle = shape.stroke ?? DEFAULT_STROKE
   ctx.fillStyle = shape.fill ?? DEFAULT_FILL
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
 
   if (shape.type === 'circle') {
     ctx.beginPath()
@@ -47,6 +53,18 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
     ctx.stroke()
   }
 
+  if (shape.type === 'polyline') {
+    const [firstPoint, ...restPoints] = shape.points
+    if (firstPoint) {
+      ctx.beginPath()
+      ctx.moveTo(firstPoint.x, firstPoint.y)
+      restPoints.forEach((point) => {
+        ctx.lineTo(point.x, point.y)
+      })
+      ctx.stroke()
+    }
+  }
+
   if (shape.type === 'polygon') {
     const [firstPoint, ...restPoints] = shape.points
     if (firstPoint) {
@@ -61,6 +79,18 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
       }
       ctx.stroke()
     }
+  }
+
+  if (shape.type === 'arc') {
+    ctx.beginPath()
+    ctx.arc(
+      shape.x,
+      shape.y,
+      shape.radius,
+      degreesToRadians(shape.startAngle),
+      degreesToRadians(shape.endAngle),
+    )
+    ctx.stroke()
   }
 
   if (shape.type === 'text') {

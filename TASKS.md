@@ -74,8 +74,8 @@ MVP 判断标准：
 | PR 9  | Done   | feat/llm-parser              | feat: add llm structured command parser          | -          | 2026-06-12   | OpenAI-compatible LLM 兜底            |
 | PR 10 | In Progress | feat/batch-actions        | feat: support batch actions and clarification    | -          | -            | 复杂指令拆解与澄清                            |
 | PR 11 | Todo   | docs/finalize-submission     | docs: finalize readme design doc and demo script | -          | -            | README / DESIGN / Demo 视频            |
-| PR 14 | In Progress | feat/expressiveness-upgrade | feat: improve drawing expressiveness             | -          | -            | 新增 ellipse/polygon、prompt 构图增强、坐标 jitter |
-| PR 15 | Todo   | feat/self-decomposition-primitives | feat: add self-decomposition drawing primitives  | -          | -            | 讨论 polyline / arc / curve，让 LLM 自我拆解对象 |
+| PR 14 | Done   | feat/expressiveness-upgrade | feat: improve drawing expressiveness             | 9dd512b    | 2026-06-12   | 新增 ellipse/polygon、prompt 构图增强、坐标 jitter |
+| PR 15 | In Progress | feat/self-decomposition-primitives | feat: add self-decomposition drawing primitives  | -          | -            | 新增 polyline / arc，让 LLM 自我拆解对象 |
 
 Status 可选值：
 

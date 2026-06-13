@@ -42,13 +42,14 @@ const OUTPUT_SCHEMA_TEXT = `{
     {
       "type": "add_shape" | "clear_canvas" | "undo" | "ask_clarification",
       "shape"?: {                     // only for add_shape
-        "type": "circle" | "ellipse" | "rect" | "line" | "polygon" | "text",
+        "type": "circle" | "ellipse" | "rect" | "line" | "polyline" | "polygon" | "arc" | "text",
         "x"?: number, "y"?: number,
         "radius"?: number,            // circle only
+        "startAngle"?: number, "endAngle"?: number, // arc only, degrees
         "radiusX"?: number, "radiusY"?: number, // ellipse only
         "width"?: number, "height"?: number, // rect only
         "x1"?: number, "y1"?: number, "x2"?: number, "y2"?: number, // line only
-        "points"?: [{ "x": number, "y": number }], // polygon only, 3-8 points
+        "points"?: [{ "x": number, "y": number }], // polyline 2-10 points, polygon 3-8 points
         "text"?: string, "fontSize"?: number, // text only
         "fill"?: string, "stroke"?: string, "lineWidth"?: number
       },
@@ -57,13 +58,14 @@ const OUTPUT_SCHEMA_TEXT = `{
   ],
   "type"?: "add_shape" | "clear_canvas" | "undo" | "ask_clarification", // allowed for simple single action
   "shape"?: {
-    "type": "circle" | "ellipse" | "rect" | "line" | "polygon" | "text",
+    "type": "circle" | "ellipse" | "rect" | "line" | "polyline" | "polygon" | "arc" | "text",
     "x": number, "y": number,
     "radius"?: number,                // circle only
+    "startAngle"?: number, "endAngle"?: number, // arc only, degrees
     "radiusX"?: number, "radiusY"?: number, // ellipse only
     "width"?: number, "height"?: number, // rect only
     "x1"?: number, "y1"?: number, "x2"?: number, "y2"?: number, // line only
-    "points"?: [{ "x": number, "y": number }], // polygon only, 3-8 points
+    "points"?: [{ "x": number, "y": number }], // polyline 2-10 points, polygon 3-8 points
     "text"?: string, "fontSize"?: number, // text only
     "fill"?: string, "stroke"?: string, "lineWidth"?: number
   },
@@ -96,19 +98,25 @@ Rules:
 - Canvas size is 800x500 pixels.
 - For add_shape, always provide a "shape" object with at least "type".
 - Supported colors (hex): #ef4444 (red), #3b82f6 (blue), #22c55e (green), #eab308 (yellow), #111827 (black).
-- Use only these shape types: circle, ellipse, rect, line, polygon, text.
-- You can map common concepts to shapes: sun=circle+line rays, tree=rect+circle/ellipse, house=rect+polygon roof, face=circle+circle eyes+line/polygon mouth.
-- IMPORTANT: If the command mentions a real-world object that does NOT map to clear circle/ellipse/rect/line/polygon/text shapes (like "牛奶", "汽车", "手机"), you MUST use "type": "ask_clarification" with a Chinese message asking what shape to use.
+- Use only these shape types: circle, ellipse, rect, line, polyline, polygon, arc, text.
+- polyline and arc are stroke-only shapes.
+- Arc angles are in degrees.
+- You can map common concepts to shapes: person=circle head+line/polyline body/arms/legs, sun=circle+line rays, tree=rect/polygon trunk+ellipse/circle crown+polyline branches, house=rect+polygon roof, face=circle+circle eyes+arc mouth, mountain=polyline, river=polyline/arc, cloud=multiple arcs/ellipses.
+- IMPORTANT: Do not ask the user which primitive shapes to use for common visible objects. People, faces, trees, houses, sun, clouds, mountains, rivers, flowers, cars, cats, and similar drawable objects MUST be decomposed by you.
+- Use ask_clarification only when the request is ambiguous, abstract, non-visual, or impossible to represent with the supported primitives.
 
 === Object Decomposition ===
 When the user describes an object or scene, follow these rules:
-1. DECOMPOSE into 2-5 shapes from [circle, ellipse, rect, line, polygon, text].
+1. DECOMPOSE complex objects into 3-8 semantic parts from [circle, ellipse, rect, line, polyline, polygon, arc, text].
 2. Main body FIRST (largest), details SECOND (smaller).
 3. Use POSITION to show relationship: eyes INSIDE face, roof ABOVE wall, rays AROUND center.
 4. Vary SIZES: main body bigger, details smaller.
-5. If you CANNOT decompose meaningfully, use ask_clarification.
+5. If you CANNOT decompose meaningfully after trying semantic parts, use ask_clarification.
 6. Never represent a complex object with only one primitive unless the user explicitly asks for that primitive shape.
 7. For people, animals, plants, buildings, or natural objects, identify semantic parts first, then map each part to primitives.
+8. Use polyline for open connected strokes such as arms, legs, branches, grass, mountains, roads, rivers, lightning, and paths.
+9. Use arc for curved strokes such as smiles, moons, cloud outlines, waves, and curved branches.
+10. For "小人" or "person", output head, body, two arms, and two legs as separate shapes. Do not ask for clarification.
 
 === Composition ===
 - Do NOT place every object at canvas center (400, 250).
@@ -126,7 +134,7 @@ When the user describes an object or scene, follow these rules:
       ],
       response_format: { type: 'json_object' },
       temperature: 0.3,
-      max_tokens: 500,
+      max_tokens: 800,
     })
 
     const content = completion.choices[0]?.message?.content

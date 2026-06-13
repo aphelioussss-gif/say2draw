@@ -18,7 +18,7 @@ export const DRAWING_ACTION_SCHEMA = {
         properties: {
           type: {
             type: 'string',
-            enum: ['circle', 'ellipse', 'rect', 'line', 'polygon', 'text'],
+            enum: ['circle', 'ellipse', 'rect', 'line', 'polyline', 'polygon', 'arc', 'text'],
             description: 'The type of shape',
           },
           x: { type: 'number', description: 'X coordinate (0-800)' },
@@ -34,9 +34,9 @@ export const DRAWING_ACTION_SCHEMA = {
           y2: { type: 'number', description: 'End Y for line (0-500)' },
           points: {
             type: 'array',
-            description: 'Points for polygon (3-8 points)',
-            minItems: 3,
-            maxItems: 8,
+            description: 'Points for polyline (2-10 points) or polygon (3-8 points)',
+            minItems: 2,
+            maxItems: 10,
             items: {
               type: 'object',
               properties: {
@@ -47,6 +47,8 @@ export const DRAWING_ACTION_SCHEMA = {
               additionalProperties: false,
             },
           },
+          startAngle: { type: 'number', description: 'Start angle for arc in degrees (-360 to 360)' },
+          endAngle: { type: 'number', description: 'End angle for arc in degrees (-360 to 360)' },
           text: { type: 'string', description: 'Text content (max 50 chars)' },
           fontSize: { type: 'number', description: 'Font size for text (12-72)' },
           fill: { type: 'string', description: 'Fill color (hex)' },

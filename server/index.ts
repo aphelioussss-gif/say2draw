@@ -228,8 +228,19 @@ const SKETCH_CAT_EXAMPLE = `<example>
 </example>`
 
 function buildSketchUserPrompt(concept: string, zone?: string | null): string {
-  const zoneHint = zone
-    ? `\n\nSpatial placement hint: the user wants this sketch placed in the "${zone}" zone of the canvas. Use grid coordinates appropriate for this zone.`
+  const zoneGrid: Record<string, string> = {
+    center:       '画布中央 (x20-30, y20-30)',
+    top:          '画布上方 (x20-30, y32-42)',
+    bottom:       '画布下方 (x20-30, y8-18)',
+    left:         '画布左边 (x6-16, y20-30)',
+    right:        '画布右边 (x34-44, y20-30)',
+    topLeft:      '画布左上角 (x6-16, y32-42)',
+    topRight:     '画布右上角 (x34-44, y32-42)',
+    bottomLeft:   '画布左下角 (x6-16, y8-18)',
+    bottomRight:  '画布右下角 (x34-44, y8-18)',
+  }
+  const zoneHint = zone && zoneGrid[zone]
+    ? `\n\n位置要求：请将主体放置在${zoneGrid[zone]}范围内。`
     : ''
   return `You need to produce a hand-drawn sketch of: ${concept}${zoneHint}
 
@@ -280,6 +291,36 @@ Output ONLY in XML format. NO markdown code fences.
 </strokes>
 
 IMPORTANT: Output the COMPLETE set of strokes for the edited sketch — both the kept strokes and the modified/added ones. This replaces the previous sketch entirely.`
+
+const SKETCH_EDIT_ADD_PROMPT = `You are an expert sketch artist adding new elements to an existing hand-drawn sketch.
+
+You work on the same numbered grid (1 to ${GRID_RES} on x and y axes, coordinates like 'x1y1').
+
+You receive:
+1. An image of the current sketch on the canvas
+2. An instruction to ADD a new element
+
+=== Rules ===
+- Study the image carefully to understand what is already drawn
+- ONLY output strokes for the NEW element being added
+- Do NOT repeat or redraw existing strokes
+- Place the new element in the position specified by the user
+- Maintain the same hand-drawn style — slight wobbles, no perfect geometry
+- Use the same stroke format (points + t_values)
+
+=== Output format ===
+Output ONLY in XML format. NO markdown code fences.
+
+<thinking>Brief analysis of what the image shows, and where to place the new element.</thinking>
+<strokes>
+  <s1>
+    <points>'x...y...', ...</points>
+    <t_values>0.00, ...</t_values>
+    <id>description</id>
+  </s1>
+</strokes>
+
+IMPORTANT: Output ONLY the strokes for the new element. The system will combine them with the existing sketch.`
 
 // ============================================================
 // API Endpoints
@@ -332,7 +373,7 @@ app.post('/api/sketch', async (req, res) => {
  * Edit an existing sketch via MiMo with multimodal input (image + text).
  */
 app.post('/api/sketch-edit', async (req, res) => {
-  const { instruction, currentImage, previousConcept } = req.body
+  const { instruction, currentImage, previousConcept, accumulate } = req.body
 
   if (!instruction || typeof instruction !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing instruction parameter' })
@@ -343,11 +384,20 @@ app.post('/api/sketch-edit', async (req, res) => {
     return res.json({ ok: false, error: 'LLM not configured' })
   }
 
+  const isAccumulate = accumulate === true
+  const editPrompt = isAccumulate ? SKETCH_EDIT_ADD_PROMPT : SKETCH_EDIT_SYSTEM_PROMPT
+  const editUserText = isAccumulate
+    ? `Current sketch concept: ${previousConcept || 'unknown'}
+Add instruction: ${instruction}
+
+Output ONLY the strokes for the new element. Do NOT repeat existing strokes.`
+    : `Current sketch concept: ${previousConcept || 'unknown'}
+Edit instruction: ${instruction}
+
+Output the COMPLETE updated strokes. Keep all unrelated strokes unchanged, only modify what the instruction asks for.`
+
   const userContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
-    {
-      type: 'text',
-      text: `Current sketch concept: ${previousConcept || 'unknown'}\nEdit instruction: ${instruction}\n\nOutput the COMPLETE updated strokes. Keep all unrelated strokes unchanged, only modify what the instruction asks for.`,
-    },
+    { type: 'text', text: editUserText },
   ]
 
   if (currentImage && typeof currentImage === 'string' && currentImage.startsWith('data:image/')) {
@@ -361,7 +411,7 @@ app.post('/api/sketch-edit', async (req, res) => {
     const completion = await client.chat.completions.create({
       model: getActiveModel(),
       messages: [
-        { role: 'system', content: SKETCH_EDIT_SYSTEM_PROMPT },
+        { role: 'system', content: editPrompt },
         { role: 'user', content: userContent as OpenAI.Chat.Completions.ChatCompletionMessage['content'] },
       ],
       temperature: 0.3,

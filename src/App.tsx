@@ -311,9 +311,8 @@ function App() {
         center: '中间', top: '上方', bottom: '下方', left: '左边', right: '右边',
         topLeft: '左上角', topRight: '右上角', bottomLeft: '左下角', bottomRight: '右下角',
       }
-      const zoneHint = zone ? `在画布${zoneNames[zone] || zone}` : '在画布上'
-      const instruction = `${zoneHint}添加以下内容，保持已有内容完全不变：${rawText}`
-      handleSketchEdit(instruction)
+      const zoneHint = zone ? `在画布${zoneNames[zone] || zone}添加：` : '在画布上添加：'
+      handleSketchEdit(`${zoneHint}${rawText}`, true)
       return
     }
     setIsGeneratingSketch(true)
@@ -381,7 +380,7 @@ function App() {
 
   // ---- Sketch editing (multimodal) ----
 
-  async function handleSketchEdit(instruction: string) {
+  async function handleSketchEdit(instruction: string, accumulate = false) {
     if (!sketchMode) return
 
     setIsGeneratingSketch(true)
@@ -397,6 +396,7 @@ function App() {
           currentImage: screenshot,
           previousConcept: sketchMode.concept,
           zone,
+          accumulate,
         }),
       })
       const data = await res.json()
@@ -405,7 +405,12 @@ function App() {
         const parsed = parseSketchXML(data.sketch, GRID_RES)
         if (parsed && parsed.strokes.length > 0) {
           const rendered = fitAndRenderStrokes(parsed.strokes)
-          setSketchStrokes(rendered)
+          if (accumulate) {
+            // Append new strokes to existing ones
+            setSketchStrokes((prev) => [...prev, ...rendered])
+          } else {
+            setSketchStrokes(rendered)
+          }
           setSketchMode({ ...sketchMode, rawStrokes: parsed.strokes })
 
           const feedback = `好的，已按"${instruction}"调整`

@@ -3,6 +3,7 @@ export type RawStroke = {
   points: string[]   // ['x13y27', 'x24y27', ...]
   tValues: number[]  // [0.0, 0.3, 0.5, 1.0]
   id?: string        // semantic label ("head", "left ear", etc.)
+  color?: string     // hex color from six-color palette, defaults to #111827
 }
 
 /** Parsed sketch from LLM XML output */
@@ -21,6 +22,7 @@ export type BezierSegment = ControlPoint[]
 export type RenderedStroke = {
   id: string
   segments: BezierSegment[]
+  color: string
 }
 
 /** Grid configuration for coordinate mapping */

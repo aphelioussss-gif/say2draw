@@ -16,8 +16,8 @@ export function FeedbackPanel({
         {message || '等待执行结果'}
       </p>
       <p className="feedback-meta">
-        {isVoiceSupported ? 'Voice feedback ready' : 'Text feedback only'}
-        {isSpeaking ? ' / Speaking' : ''}
+        {isVoiceSupported ? '语音反馈已开启' : '仅显示文字反馈'}
+        {isSpeaking ? ' / 正在播报' : ''}
       </p>
     </section>
   )

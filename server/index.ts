@@ -317,9 +317,13 @@ single_subject:
   1 element is fine. Do not force 3 elements for a single object.
 
 flowchart:
-  "elements": [{"name": "node name from user semantics", "position": "...", "color": "...", "role": "main"}]
-  "connections": [{"from": "node A", "to": "node B", "direction": "→" | "↓" | "↘"}]
-  Nodes must come from user's words or common-sense completion. Each connection has direction.
+  "elements": [{"name": "concrete step", "position": "...", "color": "...", "role": "main"}]
+  "connections": [{"from": "step A", "to": "step B", "direction": "→" | "↓" | "↘"}]
+  CRITICAL: Never collapse the user's entire sentence into one node. Always decompose into 3-6 specific step nodes.
+  Each node must represent one concrete action or state. Each connection has direction.
+  Decomposition method (do NOT copy node names verbatim—infer from the user's domain):
+  - "从登录到支付" → 登录, 验证身份, 选择商品, 提交订单, 支付, 支付成功
+  - "用户注册流程" → 填写信息, 邮箱验证, 设置密码, 注册完成
 
 funnel:
   "elements": [{"name": "meaningful stage name e.g. 认知/激活/转化/留存", "position": "top→bottom", "color": "...", "role": "main"}]
@@ -471,6 +475,8 @@ function normalizePlan(value: unknown, originalText: string): SketchPlan | null 
 
   const structuredElements = intentType === 'funnel'
     ? normalizeFunnelElements(safeElements, originalText)
+    : intentType === 'flowchart'
+    ? normalizeFlowchartElements(safeElements, originalText)
     : safeElements
 
   const rawConnections = Array.isArray(data.connections) ? data.connections : []
@@ -497,8 +503,10 @@ function normalizePlan(value: unknown, originalText: string): SketchPlan | null 
     elements: structuredElements,
     connections: intentType === 'funnel'
       ? buildSequentialConnections(structuredElements, '↓')
+      : intentType === 'flowchart'
+      ? buildSequentialConnections(structuredElements, '→')
       : connections && connections.length > 0 ? connections : undefined,
-    drawingOrder: intentType !== 'funnel' && Array.isArray(data.drawingOrder) && data.drawingOrder.every((item) => typeof item === 'string')
+    drawingOrder: intentType !== 'funnel' && intentType !== 'flowchart' && Array.isArray(data.drawingOrder) && data.drawingOrder.every((item) => typeof item === 'string')
       ? data.drawingOrder as string[]
       : structuredElements.map((item) => item.name),
   }
@@ -557,6 +565,93 @@ function normalizeStringArray(value: unknown, fallback: string[]): string[] {
     .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     .map((item) => item.trim())
   return items.length > 0 ? items : fallback
+}
+
+function shouldUsePlannerThinking(text: string, mode?: string): boolean {
+  if (mode === 'whiteboard_flow') return true
+  if (/流程|从.*到|漏斗|架构|微服务|模块|系统/.test(text)) return true
+  return false
+}
+
+function isThinkingParamError(error: unknown): boolean {
+  const msg = String(error)
+  const status = (error as Record<string, unknown> | undefined)?.status
+  if (status === 400 || status === 422) {
+    return /thinking|extra_body|invalid parameter|unrecognized/i.test(msg)
+  }
+  return false
+}
+
+function normalizeFlowchartElements(elements: PlanElement[], text: string): PlanElement[] {
+  const cleanedText = text.replace(/^(请)?画(一个|一张|一幅)?/, '').replace(/的?流程图?/g, '').trim()
+
+  const badPatterns = /^(请)?画|的?流程图?|^元素\d+$/
+  const validElements = elements.filter(
+    (e) => !badPatterns.test(e.name) && e.name !== text && e.name !== cleanedText,
+  )
+
+  // Already sufficient
+  if (validElements.length >= 3) return validElements
+
+  const nodes = inferFlowchartNodes(text, cleanedText, validElements)
+
+  return nodes.map((name, i) => ({
+    name,
+    position: i === 0 ? '左侧' : i === nodes.length - 1 ? '右侧' : '中间',
+    color: '#111827',
+    role: 'main' as const,
+    details: ['节点方框', '方向箭头', '步骤文字'],
+  }))
+}
+
+function inferFlowchartNodes(
+  text: string,
+  cleanedText: string,
+  existing: PlanElement[],
+): string[] {
+  // Existing elements with usable names (at least 2)
+  const existingNames = existing.map((e) => e.name.trim()).filter((n) => n && n !== text && n !== cleanedText)
+  if (existingNames.length >= 3) return existingNames
+
+  // E-commerce / payment domain defaults
+  const isPayment = /支付|付款|购买|下单|电商|购物|结算/.test(text)
+  const isRegister = /注册/.test(text)
+
+  // Pattern: "从A到B"
+  const fromTo = text.match(/从(.+?)到(.+?)(?:的?流程)?$/)
+  if (fromTo) {
+    const from = fromTo[1].trim()
+    const to = fromTo[2].trim()
+    if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
+    if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
+    if (existingNames.length >= 2) return existingNames
+    return [from, '处理中', to]
+  }
+
+  // Pattern: "A到B" (loose)
+  const looseFromTo = text.match(/(.+?)到(.+)/)
+  if (looseFromTo) {
+    const from = looseFromTo[1].trim()
+    const to = looseFromTo[2].trim()
+    if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
+    if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
+    if (existingNames.length >= 2) return existingNames
+    return [from, '处理中', to]
+  }
+
+  // Partial existing elements — pad with domain defaults
+  if (isPayment && existingNames.length >= 2) {
+    // Existing names are likely a subset (e.g. ['登录', '支付']); return full domain chain.
+    return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
+  }
+
+  // Domain-specific fallbacks
+  if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
+  if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
+
+  // Generic fallback
+  const label = cleanedText || '流程步骤'
+  return ['开始', label, '完成']
 }
 
 function parseSketchPlan(content: string, originalText: string): SketchPlan | null {
@@ -645,6 +740,10 @@ function inferFallbackElements(text: string, subject: string): SketchPlan['eleme
 
   if (/漏斗|转化|增长/.test(text)) {
     return normalizeFunnelElements([], text)
+  }
+
+  if (/流程|步骤|从.*到|登录|支付|下单|确认/.test(text)) {
+    return normalizeFlowchartElements([], text)
   }
 
   if (/月亮/.test(text)) {
@@ -1275,17 +1374,41 @@ app.post('/api/sketch-plan', async (req, res) => {
   }
 
   try {
-    const completion = await client.chat.completions.create({
-      model: getActiveModel(),
-      messages: [
-        { role: 'system', content: SKETCH_PLAN_PROMPT },
-        { role: 'user', content: text + modeHint },
-      ],
-      temperature: 0.3,
-      max_tokens: 800,
-      // @ts-expect-error Mimo-specific
-      extra_body: { thinking: { type: "disabled" } },
-    })
+    const useThinking = shouldUsePlannerThinking(text, mode)
+    let completion
+
+    try {
+      completion = await client.chat.completions.create({
+        model: getActiveModel(),
+        messages: [
+          { role: 'system', content: SKETCH_PLAN_PROMPT },
+          { role: 'user', content: text + modeHint },
+        ],
+        temperature: 0.3,
+        max_tokens: useThinking ? 1200 : 800,
+        ...(useThinking ? {} : {
+          // @ts-expect-error Mimo-specific
+          extra_body: { thinking: { type: "disabled" } },
+        }),
+      })
+    } catch (firstError) {
+      if (useThinking && isThinkingParamError(firstError)) {
+        console.warn('[SketchPlan] Thinking mode caused param error, retrying without thinking')
+        completion = await client.chat.completions.create({
+          model: getActiveModel(),
+          messages: [
+            { role: 'system', content: SKETCH_PLAN_PROMPT },
+            { role: 'user', content: text + modeHint },
+          ],
+          temperature: 0.3,
+          max_tokens: 800,
+          // @ts-expect-error Mimo-specific
+          extra_body: { thinking: { type: "disabled" } },
+        })
+      } else {
+        throw firstError
+      }
+    }
 
     const content = completion.choices[0]?.message?.content || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
     if (!content) {

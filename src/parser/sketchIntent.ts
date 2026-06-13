@@ -8,6 +8,9 @@
 export function isDrawingIntent(text: string): boolean {
   const clean = text.replace(/\s+/g, '').trim()
 
+  // Spatial prefix + drawing: "在左边画...", "在右上角画..."
+  if (/^(在|往|向).{1,6}(画|绘制|加|添加|写上?)/.test(clean)) return true
+
   // Direct drawing commands (画/绘制/加/添加/帮我画...)
   if (/^(画|绘制|加|添加|帮我画)/.test(clean)) return true
 

@@ -10,13 +10,13 @@ type VoicePanelProps = {
   errorMessage: string
   isSupported: boolean
   commandExamples: string[]
+  systemCommands: string[]
   onPauseListening: () => void
   onResumeListening: () => void
   feedbackMessage: string
   isFeedbackSpeaking: boolean
   isFeedbackVoiceSupported: boolean
   llmStatus: LLMStatus
-  isGeneratingSketch?: boolean
 }
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
@@ -73,6 +73,7 @@ export function VoicePanel({
   isFeedbackSpeaking,
   isFeedbackVoiceSupported,
   llmStatus,
+  systemCommands,
 }: VoicePanelProps) {
   const isPaused = status === 'paused'
   const canControlListening = isSupported && status !== 'unsupported'
@@ -313,6 +314,15 @@ export function VoicePanel({
                   ? '正在检测 AI 服务...'
                   : 'AI 服务不可用，本地指令不受影响'}
         </p>
+      </section>
+
+      <section className="voice-card system-cmds" aria-label="System commands">
+        <p className="label">⚡ 系统指令（无需 AI，即刻响应）</p>
+        <ul>
+          {systemCommands.map((cmd) => (
+            <li key={cmd}>{cmd}</li>
+          ))}
+        </ul>
       </section>
 
       <section className="demo-prompts" aria-label="Demo command examples">

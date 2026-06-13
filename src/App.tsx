@@ -26,11 +26,15 @@ import './App.css'
 const GRID_RES = 50
 
 const commandExamples = [
-  '画一个红色圆形',
-  '写上你好',
-  '撤销上一步',
+  '画一只猫',
+  '在左边画太阳和树',
+  '在右上角写上你好',
+  '长一点 · 往右移 · 就这样',
+]
+
+const systemCommands = [
+  '撤销',
   '清空画布',
-  '画一个太阳、两朵云和一棵树',
 ]
 
 const devShapeTemplates: Shape[] = [
@@ -175,7 +179,8 @@ function App() {
     concept: string
     rawStrokes: RawStroke[]
   } | null>(null)
-  const [isGeneratingSketch, setIsGeneratingSketch] = useState(false)
+  // TODO(PR19): add loading overlay when isGeneratingSketch is true
+  const [, setIsGeneratingSketch] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   // ---- Helpers ----
@@ -664,13 +669,13 @@ function App() {
           errorMessage={speech.errorMessage}
           isSupported={speech.isSupported}
           commandExamples={commandExamples}
+          systemCommands={systemCommands}
           onPauseListening={speech.pauseListening}
           onResumeListening={speech.resumeListening}
           feedbackMessage={feedbackMessage}
           isFeedbackSpeaking={speechFeedback.isSpeaking}
           isFeedbackVoiceSupported={speechFeedback.isSupported}
           llmStatus={llmStatus}
-          isGeneratingSketch={isGeneratingSketch}
         />
 
         <section className="canvas-area" aria-label="Canvas board">

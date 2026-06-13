@@ -194,6 +194,32 @@
   border-top: 0;
 }
 
+.system-cmds {
+  border-color: rgba(34, 197, 94, 0.42);
+}
+
+.system-cmds .label {
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+.system-cmds ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.system-cmds li {
+  padding: 4px 8px;
+  margin: 3px 0;
+  border: 1px solid rgba(34, 197, 94, 0.32);
+  border-radius: 4px;
+  color: var(--accent-green);
+  font-family: var(--mono);
+  font-size: 13px;
+  background: rgba(34, 197, 94, 0.08);
+}
+
 .canvas-area {
   min-width: 0;
   padding: 24px;

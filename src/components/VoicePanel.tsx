@@ -18,6 +18,7 @@ type VoicePanelProps = {
   isFeedbackVoiceSupported: boolean
   llmStatus: LLMStatus
   activeSketch: ActiveSketch | null
+  isGeneratingSketch?: boolean
 }
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
@@ -79,16 +80,15 @@ export function VoicePanel({
   const isPaused = status === 'paused'
   const canControlListening = isSupported && status !== 'unsupported'
   const [apiKeyInput, setApiKeyInput] = useState('')
-  const [provider, setProvider] = useState('deepseek')
+  const [provider, setProvider] = useState('mimo')
   const [customBaseURL, setCustomBaseURL] = useState('')
   const [modelInput, setModelInput] = useState('')
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'verifying' | 'saved' | 'error'>('idle')
   const [configError, setConfigError] = useState('')
 
   const PROVIDER_PRESETS: Record<string, { baseURL: string; defaultModel: string }> = {
-    deepseek: { baseURL: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-flash' },
-    mimo: { baseURL: 'https://api.mimo.com/v1', defaultModel: 'mimo-chat' },
-    openai: { baseURL: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
+    mimo: { baseURL: 'https://api.xiaomimimo.com/v1', defaultModel: 'mimo-v2.5' },
+    openai: { baseURL: 'https://api.openai.com/v1', defaultModel: 'gpt-4o' },
     custom: { baseURL: '', defaultModel: '' },
   }
 
@@ -212,7 +212,7 @@ export function VoicePanel({
                     borderRadius: 4,
                   }}
                 >
-                  {p === 'deepseek' ? 'DeepSeek' : p === 'mimo' ? 'Mimo' : p === 'openai' ? 'OpenAI' : '其他'}
+                  {p === 'mimo' ? 'Mimo' : p === 'openai' ? 'OpenAI' : '其他'}
                 </button>
               ))}
             </div>

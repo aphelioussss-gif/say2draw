@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { forwardRef, useEffect, useRef } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, type Shape } from '../domain/shapes'
 
 type CanvasBoardProps = {
@@ -117,8 +117,10 @@ function drawEmptyState(ctx: CanvasRenderingContext2D) {
   ctx.restore()
 }
 
-export function CanvasBoard({ shapes }: CanvasBoardProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+export const CanvasBoard = forwardRef<HTMLCanvasElement, CanvasBoardProps>(
+  ({ shapes }, ref) => {
+  const internalRef = useRef<HTMLCanvasElement>(null)
+  const canvasRef = (ref as React.RefObject<HTMLCanvasElement>) || internalRef
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -156,4 +158,6 @@ export function CanvasBoard({ shapes }: CanvasBoardProps) {
       height={CANVAS_HEIGHT}
     />
   )
-}
+})
+
+CanvasBoard.displayName = 'CanvasBoard'

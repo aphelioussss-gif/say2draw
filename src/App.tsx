@@ -143,12 +143,7 @@ function App() {
     originalText: string
     sceneType?: string
     previewText: string
-    layoutBrief?: string
-    styleBrief?: string
-    polishHints: string[]
     drawingOrder?: string[]
-    detailChecklist?: string[]
-    avoid?: string[]
     elements: Array<{ name: string; position: string; color: string; role: string; details?: string[] }>
   }
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null)
@@ -303,10 +298,7 @@ function App() {
       if (data.ok && data.plan) {
         setPendingPlan({ ...data.plan, originalText: rawText })
         const preview = data.plan.previewText || '已生成绘图计划'
-        const hints = data.plan.polishHints?.length
-          ? `。画完后可以说：${data.plan.polishHints.slice(0, 2).join('、')}`
-          : ''
-        const message = `${preview}。可以说确认开始画，取消重来，也可以继续说你想怎么改。${hints}`
+        const message = `${preview}。可以说确认开始画，取消重来，也可以继续说你想怎么改。`
         setFeedbackMessage(message)
         speechFeedback.speak(message, {
           onEnd: () => {
@@ -423,10 +415,7 @@ function App() {
             message: `Generated sketch: ${parsed.concept}`,
           })
 
-          const polish = plan.polishHints?.length
-            ? ` 可以继续说：${plan.polishHints.slice(0, 3).join('、')}`
-            : ''
-          const message = `已为你画了${parsed.concept}的草图。${polish}`
+          const message = `已为你画了${parsed.concept}的草图。你可以继续说：加一点细节、轮廓更清楚、放大主体。`
           setFeedbackMessage(message)
           speechFeedback.speak(message, {
             onEnd: () => {

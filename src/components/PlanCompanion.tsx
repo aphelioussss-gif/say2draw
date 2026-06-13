@@ -9,13 +9,8 @@ type PlanElement = {
 type PendingPlan = {
   sceneType?: string
   previewText: string
-  layoutBrief?: string
-  styleBrief?: string
   elements: PlanElement[]
   drawingOrder?: string[]
-  detailChecklist?: string[]
-  avoid?: string[]
-  polishHints: string[]
 }
 
 type PlanCompanionProps = {
@@ -57,15 +52,8 @@ export function PlanCompanion({ plan }: PlanCompanionProps) {
 
       <div className="plan-next-step">
         <span className="status-dot processing" aria-hidden="true" />
-        <p>我先按这个 brief 起稿。你可以说“确认”开始画，也可以继续说“月亮更弯一点”“加两颗星星”。</p>
+        <p>确认开始画，也可以继续说你想怎么改。</p>
       </div>
-
-      {(plan.layoutBrief || plan.styleBrief) && (
-        <div className="plan-brief">
-          {plan.layoutBrief && <p>{plan.layoutBrief}</p>}
-          {plan.styleBrief && <p>{plan.styleBrief}</p>}
-        </div>
-      )}
 
       <div className="plan-section">
         <p className="label">画面元素</p>
@@ -99,39 +87,6 @@ export function PlanCompanion({ plan }: PlanCompanionProps) {
           ))}
         </ol>
       </div>
-
-      {plan.detailChecklist && plan.detailChecklist.length > 0 && (
-        <div className="plan-section">
-          <p className="label">必须画出来</p>
-          <ul className="plan-checklist">
-            {plan.detailChecklist.slice(0, 8).map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {plan.avoid && plan.avoid.length > 0 && (
-        <div className="plan-section">
-          <p className="label">避坑</p>
-          <ul className="plan-avoid">
-            {plan.avoid.slice(0, 3).map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {plan.polishHints.length > 0 && (
-        <div className="plan-section">
-          <p className="label">画完可以继续说</p>
-          <div className="plan-hints">
-            {plan.polishHints.map((hint) => (
-              <span key={hint}>{hint}</span>
-            ))}
-          </div>
-        </div>
-      )}
     </section>
   )
 }

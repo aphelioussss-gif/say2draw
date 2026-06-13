@@ -40,7 +40,11 @@ function getOpenAIClient(): OpenAI | null {
 
 const GRID_RES = 50
 
-const SKETCH_SYSTEM_PROMPT = `You are an expert sketch artist specializing in minimal hand-drawn line art. Your sketches are clean, readable, and communication-focused — like whiteboard drawings or notebook doodles, not fine art.
+// ============================================================
+// Scene-aware sketch prompts: common base + 4 scene deltas
+// ============================================================
+
+const SKETCH_BASE_PROMPT = `You are an expert sketch artist specializing in minimal hand-drawn line art. Your sketches are clean, readable, and communication-focused — like whiteboard drawings or notebook doodles.
 
 You draw on a numbered grid: 1 to ${GRID_RES} along the bottom (x) and 1 to ${GRID_RES} along the left (y). Bottom-left is 'x1y1', top-right is 'x${GRID_RES}y${GRID_RES}'.
 
@@ -81,26 +85,32 @@ Straight line:
 Points = ['x18y31', 'x35y14']
 t_values = [0.00, 1.00]
 
-=== Style rules ===
+=== Core style rules ===
 - Clean, minimal line art. No shading, no fill, no textures.
 - Clear outlines with the fewest strokes needed for recognition.
-- Whiteboard / notebook style: slight natural irregularity, but intentionally readable.
+- Slight natural irregularity, but intentionally readable.
 - Do NOT add random wobbles, decorative strokes, or overly long stray lines.
 - Long strokes should be split into connected shorter segments.
-- Text/characters: short connected handwriting strokes.
-
-=== Composition ===
-- Place objects in the zone requested by the user. Default to center if no zone specified.
-- Keep objects inside x8..x42 and y8..y42.
-- Use 4-20 strokes per object. Simple objects use fewer; complex objects use more.
-- Draw main body first, then attached details (ears, legs, tail, face).
+- Draw main body first, then attached details.
 - Larger elements first, smaller details second.
 - Leave breathing room between elements.
+
+=== Abstract input translation ===
+If the user's input does NOT directly describe drawable objects (e.g. emotions, moods, abstract concepts, states of being), you MUST first translate it into a concrete visual scene, then draw that scene.
+Steps:
+1. Identify the core feeling or concept the user is expressing.
+2. Choose a visual metaphor that conveys this concept (a scene, composition, or symbolic arrangement).
+3. Decide on the key elements and their positions.
+4. Explain your translation in <thinking>, then draw normally.
+
+Example: "女性很有困境" → feeling: pressure / constraint / struggle
+→ metaphor: a female figure surrounded by oppressive shapes, or standing alone in a narrow space
+→ elements: female silhouette (center), enclosing lines or barriers (surrounding), a faint opening or light (top)
 
 === Output format ===
 Output ONLY in XML. NO markdown fences.
 
-<thinking>Brief drawing strategy: parts, order, placement, colors.</thinking>
+<thinking>Drawing strategy: how you interpreted the input, parts, order, placement, colors.</thinking>
 <strokes>
   <s1>
     <points>'x...y...', ...</points>
@@ -109,6 +119,49 @@ Output ONLY in XML. NO markdown fences.
     <color>#ef4444</color>  <!-- optional, omit for black -->
   </s1>
 </strokes>`
+
+const SCENE_DELTAS: Record<string, string> = {
+  quick_sketch: `
+=== Scene: Quick Sketch ===
+You are drawing a quick, spontaneous sketch. Your goal is speed and recognition, not completeness.
+- Use 4-10 strokes total. Be concise.
+- Focus on the single most recognizable silhouette or shape.
+- Leave generous empty space around the subject.
+- Skip small decorative details — only draw what makes the subject identifiable.
+- A loose, confident single-pass look is better than an overworked drawing.`,
+
+  whiteboard: `
+=== Scene: Whiteboard / Flow ===
+You are drawing a structured whiteboard diagram. Your goal is information clarity.
+- Use boxes, arrows, and labels to convey relationships and flow.
+- Prioritize logical layout over aesthetic charm.
+- Connect related elements with clean lines or arrows.
+- Split text labels into short handwriting strokes.
+- Each element should have a clear purpose in the diagram.`,
+
+  story_scene: `
+=== Scene: Story Scene ===
+You are illustrating a narrative moment or emotional scene. Your goal is atmosphere and storytelling.
+- Compose multiple elements into a coherent scene with a clear focal point.
+- Use scale, position, and relative size to convey meaning and mood.
+- Character posture and spatial relationships matter more than object precision.
+- The abstract input translation rules are especially important here: turn feelings into visual scenes.
+- A recognizable scene with emotional weight beats a technically perfect but empty drawing.`,
+
+  teaching_diagram: `
+=== Scene: Teaching Diagram ===
+You are drawing an educational diagram. Your goal is to help someone understand a concept.
+- Build the drawing in logical layers: main structure first, then labels and annotations.
+- Show relationships between parts clearly.
+- Use arrows or connecting lines to indicate processes or dependencies.
+- Small text labels (short handwriting strokes) help but do not over-label.
+- The drawing should guide someone through the concept step by step.`,
+}
+
+function buildSketchSystemPrompt(sceneType: string): string {
+  const delta = SCENE_DELTAS[sceneType] || SCENE_DELTAS.quick_sketch
+  return SKETCH_BASE_PROMPT + delta
+}
 
 const SKETCH_HOUSE_EXAMPLE = `<example>
 <concept>House</concept>
@@ -217,16 +270,14 @@ const SKETCH_CAT_EXAMPLE = `<example>
 </strokes>
 </example>`
 
-const SKETCH_PLAN_PROMPT = `You are a drawing planner for a voice-controlled sketch tool. Your job is to analyze what the user wants to draw and produce a structured plan BEFORE any drawing happens.
+const SKETCH_PLAN_PROMPT = `You are a drawing planner for a voice-controlled sketch tool. Your job is to analyze what the user wants to draw and produce a lightweight plan BEFORE any drawing happens.
 
 The tool draws minimal hand-drawn line art using only six colors: black (#111827), red (#ef4444), blue (#3b82f6), green (#22c55e), yellow (#eab308), white (#f9fafb).
 
 Given the user's spoken command, output a JSON plan:
 {
   "sceneType": "quick_sketch" | "whiteboard" | "story_scene" | "teaching_diagram",
-  "previewText": "short Chinese sentence describing what will be drawn",
-  "layoutBrief": "Chinese composition brief with positions, scale, spacing, and relationship between elements",
-  "styleBrief": "Chinese visual style brief for recognizable minimal line art",
+  "previewText": "short Chinese sentence describing what will be drawn (under 30 characters)",
   "elements": [{
     "name": "Chinese name of the element",
     "position": "Chinese position description (中间/左上角/右边/下面 etc.)",
@@ -234,25 +285,27 @@ Given the user's spoken command, output a JSON plan:
     "role": "main" | "supporting" | "label",
     "details": ["2-4 concrete drawable details, e.g. 弯月弧线, 长头发, 裙摆, 星星"]
   }],
-  "drawingOrder": ["element names in order"],
-  "detailChecklist": ["3-6 concrete details that must appear in the sketch"],
-  "avoid": ["2-4 mistakes to avoid"],
-  "polishHints": ["3-5 natural Chinese refinement commands the user can say after drawing"]
+  "drawingOrder": ["element names in order"]
 }
+
+Scene type guide:
+- quick_sketch: single simple subject, fast and loose.
+- whiteboard: flowchart, steps, logic, arrows, boxes.
+- story_scene: narrative moments, emotional scenes, abstract or metaphorical input.
+- teaching_diagram: layered educational diagrams, concept explanations.
 
 Rules:
 - Default color is black (#111827). Only use other colors when the user explicitly mentions them.
-- If the user says an unsupported color (e.g., purple, orange), map it to the nearest palette color.
+- If the user says an unsupported color, map it to the nearest palette color.
 - Do not make a shallow plan. Split scenes into multiple drawable elements.
 - Include concrete visible details that help the sketch stay recognizable.
 - Keep previewText concise (one sentence, under 30 Chinese characters).
+- If the input is abstract (emotion, mood, concept), choose story_scene and provide elements that form a visual metaphor.
 - Output ONLY the JSON object. No markdown fences. No extra text.`
 
 type SketchPlan = {
   sceneType: 'quick_sketch' | 'whiteboard' | 'story_scene' | 'teaching_diagram'
   previewText: string
-  layoutBrief: string
-  styleBrief: string
   elements: Array<{
     name: string
     position: string
@@ -261,9 +314,6 @@ type SketchPlan = {
     details: string[]
   }>
   drawingOrder: string[]
-  detailChecklist: string[]
-  avoid: string[]
-  polishHints: string[]
 }
 
 const PLAN_COLORS = new Set(['#111827', '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#f9fafb'])
@@ -358,21 +408,10 @@ function normalizePlan(value: unknown, originalText: string): SketchPlan | null 
     previewText: typeof data.previewText === 'string' && data.previewText.trim()
       ? data.previewText.trim().slice(0, 40)
       : buildFallbackPreview(originalText),
-    layoutBrief: typeof data.layoutBrief === 'string' && data.layoutBrief.trim()
-      ? data.layoutBrief.trim()
-      : buildFallbackLayoutBrief(safeElements),
-    styleBrief: typeof data.styleBrief === 'string' && data.styleBrief.trim()
-      ? data.styleBrief.trim()
-      : '用干净的手绘线条表达主体，减少无意义笔画，保证每个元素可辨认。',
     elements: safeElements,
     drawingOrder: Array.isArray(data.drawingOrder) && data.drawingOrder.every((item) => typeof item === 'string')
       ? data.drawingOrder as string[]
       : safeElements.map((item) => item.name),
-    detailChecklist: normalizeStringArray(data.detailChecklist, safeElements.flatMap((item) => item.details).slice(0, 6)),
-    avoid: normalizeStringArray(data.avoid, ['不要把所有元素堆在一起', '不要省略主体的关键特征']),
-    polishHints: Array.isArray(data.polishHints) && data.polishHints.every((item) => typeof item === 'string')
-      ? (data.polishHints as string[]).slice(0, 5)
-      : buildFallbackPolishHints(originalText),
   }
 }
 
@@ -416,38 +455,14 @@ function buildFallbackPreview(text: string): string {
   return `将绘制${subject}`.slice(0, 40)
 }
 
-function buildFallbackLayoutBrief(elements: SketchPlan['elements']): string {
-  return elements
-    .map((element) => `${element.name}放在${element.position}`)
-    .join('，') || '主体放在画布中间，保持元素之间有留白。'
-}
-
-function buildFallbackPolishHints(text: string): string[] {
-  if (/月亮|女孩/.test(text)) {
-    return ['月亮更弯一点', '给女孩加头发', '加两颗星星', '女孩小一点']
-  }
-  if (/流程|步骤/.test(text)) {
-    return ['箭头更明显', '节点分开一点', '加上文字标签']
-  }
-  if (/太阳|树/.test(text)) {
-    return ['太阳放右上角', '树大一点', '加一条地平线']
-  }
-  return ['轮廓更清楚', '加一点细节', '主体放大一点']
-}
-
 function createFallbackPlan(text: string): SketchPlan {
   const subject = text.replace(/^(请)?画(一个|一只|一幅|一下)?/, '').trim() || text
   const elements = inferFallbackElements(text, subject)
   return {
     sceneType: inferSceneType(text),
     previewText: buildFallbackPreview(text),
-    layoutBrief: buildFallbackLayoutBrief(elements),
-    styleBrief: '用极简手绘线条，先画主体轮廓，再补关键细节。',
     elements,
     drawingOrder: elements.map((element) => element.name),
-    detailChecklist: elements.flatMap((element) => element.details).slice(0, 6),
-    avoid: ['不要只画抽象符号', '不要把元素挤在同一个位置'],
-    polishHints: buildFallbackPolishHints(text),
   }
 }
 
@@ -510,9 +525,6 @@ function reviseFallbackPlan(plan: SketchPlan, revision: string): SketchPlan {
   const next: SketchPlan = {
     ...plan,
     elements: plan.elements.map((element) => ({ ...element, details: [...element.details] })),
-    detailChecklist: [...plan.detailChecklist],
-    avoid: [...plan.avoid],
-    polishHints: [...plan.polishHints],
   }
 
   if (/星星|星/.test(revision) && !next.elements.some((element) => element.name.includes('星'))) {
@@ -556,22 +568,14 @@ function reviseFallbackPlan(plan: SketchPlan, revision: string): SketchPlan {
     next.drawingOrder.push('影子')
   }
 
-  if (/上|高一点/.test(revision)) {
-    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往上调整。`
-  } else if (/下|低一点/.test(revision)) {
-    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往下调整。`
-  } else if (/左/.test(revision)) {
-    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往左调整。`
-  } else if (/右/.test(revision)) {
-    next.layoutBrief = `${next.layoutBrief}；按修改意见把相关元素往右调整。`
+  // Apply directional hints to element positions
+  const dirHint = /上|高一点/.test(revision) ? '往上' : /下|低一点/.test(revision) ? '往下' : /左/.test(revision) ? '往左' : /右/.test(revision) ? '往右' : ''
+  if (dirHint) {
+    next.elements.forEach((element) => {
+      element.position = `${element.position}${dirHint}`
+    })
   }
 
-  next.detailChecklist = mergeUnique([
-    ...priorityDetails,
-    ...next.elements.flatMap((element) => element.details),
-    ...next.detailChecklist,
-  ], []).slice(0, 10)
-  next.polishHints = mergeUnique(['确认开始画', '再加一点细节', ...next.polishHints], []).slice(0, 5)
   next.previewText = plan.previewText
   return next
 }
@@ -597,7 +601,7 @@ function buildSketchUserPrompt(concept: string, zone?: string | null, approvedPl
     : ''
   const planHint = approvedPlan
     ? `\n\n已批准的绘图计划（必须严格遵循）：${JSON.stringify(approvedPlan)}
-Draw every listed element as a separate recognizable part. Respect layoutBrief, styleBrief, detailChecklist, avoid, each element's details, position, and drawingOrder. If the plan describes a scene, do not collapse it into one symbol.`
+Draw every listed element as a separate recognizable part. Respect each element's name, position, color, role, details, and the overall drawingOrder. The <thinking> tag should describe your composition approach (layout and style) in your own words. Do not collapse a multi-element scene into one symbol.`
     : ''
   return `You need to produce a clean hand-drawn line-art sketch of: ${concept}${zoneHint}${planHint}
 
@@ -634,6 +638,18 @@ You receive:
 - If adding new elements, place them in contextually appropriate positions
 - Maintain the same hand-drawn style — slight wobbles, no perfect geometry
 - Use the same stroke format (points + t_values)
+
+=== Vague instruction handling ===
+Users often give vague edit instructions like "加一点细节", "轮廓更清楚", "主体放大一点".
+When you receive such instructions:
+1. Look at the image and identify what is missing or ambiguous
+2. Translate the vague instruction into a concrete visual change
+3. Describe your interpretation in <thinking>, then execute
+
+Examples:
+- "加一点细节" → add missing texture lines, inner contours, or connecting details that make the subject more recognizable
+- "轮廓更清楚" → reinforce the main outline with clearer, more continuous strokes
+- "主体放大一点" → scale up the main element while keeping supporting elements in proportion
 
 === Output format ===
 Output ONLY in XML format. NO markdown code fences.
@@ -688,11 +704,21 @@ IMPORTANT: Output ONLY the strokes for the new element. The system will combine 
  * Generate a structured drawing plan before drawing.
  */
 app.post('/api/sketch-plan', async (req, res) => {
-  const { text } = req.body
+  const { text, mode } = req.body
 
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing text parameter' })
   }
+
+  const modeToSceneType: Record<string, string> = {
+    free_draw: 'quick_sketch',
+    whiteboard_flow: 'whiteboard',
+    story_scene: 'story_scene',
+    teaching_diagram: 'teaching_diagram',
+  }
+  const modeHint = mode && typeof mode === 'string'
+    ? `\nSuggested scene type from user interface: ${modeToSceneType[mode] || mode}. Follow this unless the user's words clearly suggest another type.`
+    : ''
 
   const client = getOpenAIClient()
   if (!client) {
@@ -704,7 +730,7 @@ app.post('/api/sketch-plan', async (req, res) => {
       model: getActiveModel(),
       messages: [
         { role: 'system', content: SKETCH_PLAN_PROMPT },
-        { role: 'user', content: text },
+        { role: 'user', content: text + modeHint },
       ],
       temperature: 0.3,
       max_tokens: 800,
@@ -809,10 +835,13 @@ app.post('/api/sketch', async (req, res) => {
   }
 
   try {
+    const sceneType = approvedPlan && typeof approvedPlan === 'object' && 'sceneType' in approvedPlan
+      ? (approvedPlan as Record<string, unknown>).sceneType as string
+      : 'quick_sketch'
     const completion = await client.chat.completions.create({
       model: getActiveModel(),
       messages: [
-        { role: 'system', content: SKETCH_SYSTEM_PROMPT },
+        { role: 'system', content: buildSketchSystemPrompt(sceneType) },
         { role: 'user', content: buildSketchUserPrompt(text, typeof zone === 'string' ? zone : null, approvedPlan || null) },
       ],
       temperature: 0.3,

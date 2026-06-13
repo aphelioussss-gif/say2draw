@@ -78,7 +78,7 @@ MVP 判断标准：
 | PR 15 | Done   | feat/self-decomposition-primitives | feat: add self-decomposition drawing primitives  | a455529    | 2026-06-13   | 新增 polyline / arc，canvas 渲染 + server prompt 拆解规则 |
 | PR 16 | Merged | feat/fallback-sketch-mode | fix: force LLM actions array, fix feedback sync, remove json_object mode | 935459c    | 2026-06-13   | 强制 actions 数组、反馈同步、JSON 解析修复 |
 | PR 17 | In Progress | feat/sketch-stroke-mode | feat: add unified sketch stroke rendering pipeline | dd78d36    | 2026-06-13   | SketchAgent 笔触草图管线，统一画法，Mimo 多模态 |
-| PR 18 | In Progress | feat/canvas-spatial-precision | feat: add canvas zones and spatial command placement | - | - | 9 区空间模型、空间语音指令、防重叠、多对象分发 |
+| PR 18 | Review | feat/canvas-spatial-precision | feat: add canvas zones and spatial command placement | - | - | 9 区空间模型、空间语音指令、防重叠、多对象分发、死代码清理 |
 
 Status 可选值：
 

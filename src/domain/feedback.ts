@@ -1,5 +1,15 @@
 import type { DrawingAction } from './actions'
 
+export type FeedbackStatus = 'idle' | 'listening' | 'thinking' | 'success' | 'error'
+
+export type FeedbackState = {
+  heardText?: string
+  understoodAs?: string
+  result?: string
+  suggestion?: string
+  status: FeedbackStatus
+}
+
 function extractDrawingTarget(rawText: string): string | null {
   const normalized = rawText.replace(/\s+/g, '')
   const match = normalized.match(/(?:请你|你)?(?:给我|帮我|请)?(?:画|绘制)(.+?)(?:吧|[，。,.！!？?]|$)/)

@@ -70,8 +70,6 @@ export function VoicePanel({
   onPauseListening,
   onResumeListening,
   feedbackMessage,
-  isFeedbackSpeaking,
-  isFeedbackVoiceSupported,
   llmStatus,
   systemCommands,
 }: VoicePanelProps) {
@@ -170,9 +168,10 @@ export function VoicePanel({
       )}
 
       <FeedbackPanel
-        message={feedbackMessage}
-        isSpeaking={isFeedbackSpeaking}
-        isVoiceSupported={isFeedbackVoiceSupported}
+        feedback={{
+          status: feedbackMessage ? 'success' : 'idle',
+          result: feedbackMessage || undefined,
+        }}
       />
 
       <section className="voice-card feedback-card" aria-label="LLM status">

@@ -12,8 +12,6 @@ type VoiceStatusBarProps = {
   isSupported: boolean
   onPauseListening: () => void
   onResumeListening: () => void
-  feedbackMessage: string
-  isFeedbackSpeaking: boolean
 }
 
 function getVoiceLabel(status: VoiceStatus): string {
@@ -38,8 +36,6 @@ export function VoiceStatusBar({
   isSupported,
   onPauseListening,
   onResumeListening,
-  feedbackMessage,
-  isFeedbackSpeaking,
 }: VoiceStatusBarProps) {
   const isPaused = status === 'paused'
   const canControlListening = isSupported && status !== 'unsupported'
@@ -66,11 +62,6 @@ export function VoiceStatusBar({
       </div>
 
       <div className="voice-status-right">
-        {feedbackMessage && (
-          <span className={`voice-feedback-tag ${isFeedbackSpeaking ? 'speaking' : ''}`}>
-            {feedbackMessage.length > 40 ? feedbackMessage.slice(0, 40) + '...' : feedbackMessage}
-          </span>
-        )}
         {canControlListening && (
           <button
             type="button"

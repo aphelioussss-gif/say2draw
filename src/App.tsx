@@ -8,7 +8,8 @@ import { SidebarNav } from './components/SidebarNav'
 import { ConfigPage } from './components/ConfigPage'
 import { VoiceStatusBar } from './components/VoiceStatusBar'
 import { ModePresetPanel } from './components/ModePresetPanel'
-import { getActionFeedback, getBatchFeedback } from './domain/feedback'
+import { FeedbackPanel } from './components/FeedbackPanel'
+import { getActionFeedback, getBatchFeedback, type FeedbackState } from './domain/feedback'
 import {
   drawingReducer,
   initialDrawingState,
@@ -222,7 +223,11 @@ function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
 
 function App() {
   const [state, dispatch] = useReducer(drawingReducer, initialDrawingState)
-  const [feedbackMessage, setFeedbackMessage] = useState('')
+  const [feedback, setFeedback] = useState<FeedbackState>({ status: 'idle' })
+
+  function updateFeedback(patch: Partial<FeedbackState>) {
+    setFeedback((prev) => ({ ...prev, ...patch }))
+  }
   const speechFeedback = useSpeechSynthesis()
   const llmStatus = useLLMStatus()
 
@@ -389,7 +394,7 @@ function App() {
     }
 
     setIsGeneratingSketch(true)
-    setFeedbackMessage('正在生成绘图计划...')
+    updateFeedback({ status: 'thinking' })
 
     try {
       const res = await fetch('/api/sketch-plan', {
@@ -408,7 +413,7 @@ function App() {
         setPendingPlan({ ...data.plan, originalText: rawText })
         const preview = data.plan.previewText || '已生成绘图计划'
         const message = `${preview}。可以说确认开始画，取消重来，也可以继续说你想怎么改。`
-        setFeedbackMessage(message)
+        updateFeedback({ result: message, status: 'success' })
         if (!speech.isManuallyPausedRef.current) {
           speech.resumeListening()
         }
@@ -420,14 +425,14 @@ function App() {
         return
       }
 
-      setFeedbackMessage('计划生成失败，请重试')
+      updateFeedback({ result: '计划生成失败，请重试', status: 'error', suggestion: '请换一种描述方式再试' })
       speechFeedback.speak('计划生成失败，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
       })
     } catch {
-      setFeedbackMessage('网络错误，请重试')
+      updateFeedback({ result: '网络错误，请重试', status: 'error' })
       speechFeedback.speak('网络错误，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -443,7 +448,7 @@ function App() {
 
     const currentPlan = pendingPlan
     setIsGeneratingSketch(true)
-    setFeedbackMessage('正在调整绘图计划...')
+    updateFeedback({ status: 'thinking' })
 
     try {
       const res = await fetch('/api/sketch-plan/revise', {
@@ -463,7 +468,7 @@ function App() {
         const revisedPlan = { ...data.plan, originalText: currentPlan.originalText }
         setPendingPlan(revisedPlan)
         const message = `${data.plan.previewText || '计划已更新'}。已按你的意见调整，确认就开始画，也可以继续修改。`
-        setFeedbackMessage(message)
+        updateFeedback({ result: message, status: 'success' })
         speechFeedback.speak(message, {
           onEnd: () => {
             if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -472,14 +477,14 @@ function App() {
         return
       }
 
-      setFeedbackMessage('计划调整失败，请换一种说法')
+      updateFeedback({ result: '计划调整失败', status: 'error', suggestion: '请换一种说法' })
       speechFeedback.speak('计划调整失败，请换一种说法', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
       })
     } catch {
-      setFeedbackMessage('网络错误，请重试')
+      updateFeedback({ result: '网络错误，请重试', status: 'error' })
       speechFeedback.speak('网络错误，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -493,7 +498,7 @@ function App() {
   async function executeApprovedPlan() {
     if (!pendingPlan) return
     setIsGeneratingSketch(true)
-    setFeedbackMessage('正在绘制...')
+    updateFeedback({ status: 'thinking' })
     const plan = pendingPlan
     setPendingPlan(null)
 
@@ -528,7 +533,7 @@ function App() {
           })
 
           const message = `已为你画了${parsed.concept}的草图。你可以继续说：加一点细节、轮廓更清楚、放大主体。`
-          setFeedbackMessage(message)
+          updateFeedback({ result: message, status: 'success' })
           speechFeedback.speak(message, {
             onEnd: () => {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -539,14 +544,14 @@ function App() {
       }
 
       console.warn('[Sketch] Execution failed:', { ok: data.ok, hasSketch: !!data.sketch, error: data.error })
-      setFeedbackMessage('草图生成失败，请重试')
+      updateFeedback({ result: '草图生成失败，请重试', status: 'error' })
       speechFeedback.speak('草图生成失败，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
       })
     } catch {
-      setFeedbackMessage('网络错误，请重试')
+      updateFeedback({ result: '网络错误，请重试', status: 'error' })
       speechFeedback.speak('网络错误，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -567,7 +572,7 @@ function App() {
     setSketchMode((prev) => prev ? { ...prev, lastSnapshot: snapshot } : null)
 
     setIsGeneratingSketch(true)
-    setFeedbackMessage('正在理解你的意思...')
+    updateFeedback({ status: 'thinking' })
 
     try {
       const res = await fetch('/api/sketch-flowchart-edit', {
@@ -592,9 +597,9 @@ function App() {
             flowchartModel: data.model || prev.flowchartModel,
           } : null)
 
-          const feedback = data.explanation || `好的，已按你"${instruction}"调整了流程图布局`
-          setFeedbackMessage(feedback)
-          speechFeedback.speak(feedback, {
+          const feedbackMsg = data.explanation || `好的，已按你"${instruction}"调整了流程图布局`
+          updateFeedback({ result: feedbackMsg, status: 'success' })
+          speechFeedback.speak(feedbackMsg, {
             onEnd: () => {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
             },
@@ -604,11 +609,11 @@ function App() {
       }
 
       console.warn('[FlowchartLayout] Failed:', { ok: data.ok, hasSketch: !!data.sketch, error: data.error })
-      setFeedbackMessage('流程图调整失败，请重试')
+      updateFeedback({ result: '流程图调整失败，请重试', status: 'error' })
       speechFeedback.speak('流程图调整失败，请重试')
     } catch (error) {
       console.error('[FlowchartLayout] Error:', error)
-      setFeedbackMessage('网络错误，请重试')
+      updateFeedback({ result: '网络错误，请重试', status: 'error' })
       speechFeedback.speak('网络错误，请重试')
     } finally {
       setIsGeneratingSketch(false)
@@ -651,9 +656,9 @@ function App() {
           }
           setSketchMode({ ...sketchMode, rawStrokes: parsed.strokes })
 
-          const feedback = `好的，已按"${instruction}"调整`
-          setFeedbackMessage(feedback)
-          speechFeedback.speak(feedback, {
+          const feedbackEdit = `好的，已按"${instruction}"调整`
+          updateFeedback({ result: feedbackEdit, status: 'success' })
+          speechFeedback.speak(feedbackEdit, {
             onEnd: () => {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
             },
@@ -664,7 +669,7 @@ function App() {
 
       // Handle structured error codes from server
       if (data.code === 'LLM_NOT_CONFIGURED') {
-        setFeedbackMessage('需要先配置 LLM Key 才能进行复杂调整。你可以先试试说"往右一点""放大""改颜色"。')
+        updateFeedback({ result: 'LLM Key 未配置', status: 'error', suggestion: '请先在设置页配置 LLM Key，或说"往右一点""放大"等简单调整' })
         speechFeedback.speak('需要先配置 LLM Key 才能进行复杂调整。你可以先试试说"往右一点""放大""改颜色"。', {
           onEnd: () => {
             if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -673,7 +678,7 @@ function App() {
         return
       }
       if (data.code === 'VISION_NOT_SUPPORTED') {
-        setFeedbackMessage('当前模型不支持图片输入，请到设置页换一个支持视觉的模型。')
+        updateFeedback({ result: '当前模型不支持图片输入', status: 'error', suggestion: '请到设置页换一个支持视觉的模型' })
         speechFeedback.speak('当前模型不支持图片输入，请到设置页换一个支持视觉的模型。', {
           onEnd: () => {
             if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -682,7 +687,7 @@ function App() {
         return
       }
       if (data.code === 'INVALID_XML') {
-        setFeedbackMessage('模型没返回可画的格式，请说"重新排版流程图"再试一次。')
+        updateFeedback({ result: '模型未返回可绘制格式', status: 'error', suggestion: '说"重新排版流程图"再试一次' })
         speechFeedback.speak('模型没返回可画的格式，请说重新排版流程图再试一次。', {
           onEnd: () => {
             if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -692,14 +697,14 @@ function App() {
       }
 
       console.warn('[SketchEdit] Edit failed:', { instruction, accumulate, ok: data.ok, hasSketch: !!data.sketch, error: data.error, code: data.code })
-      setFeedbackMessage('调整失败，请重试')
+      updateFeedback({ result: '调整失败，请重试', status: 'error' })
       speechFeedback.speak('调整失败，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
       })
     } catch {
-      setFeedbackMessage('网络错误，请重试')
+      updateFeedback({ result: '网络错误，请重试', status: 'error' })
       speechFeedback.speak('网络错误，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -725,7 +730,7 @@ function App() {
           setPendingTranscriptReview(null)
         } else if (/^(重说|不对|重新听|重新识别|听错了|不是)$/.test(trimmedTranscript)) {
           setPendingTranscriptReview(null)
-          setFeedbackMessage('好的，请重新说一遍绘画指令。')
+          updateFeedback({ result: '好的，请重新说一遍', status: 'success', suggestion: '请重新说一遍绘画指令' })
           speechFeedback.speak('好的，请重新说一遍绘画指令。', {
             onEnd: () => {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -739,7 +744,7 @@ function App() {
             setPendingTranscriptReview(null)
           } else {
             const message = buildTranscriptReviewMessage(pendingTranscriptReview)
-            setFeedbackMessage(message)
+            updateFeedback({ heardText: pendingTranscriptReview.originalText, status: 'thinking', understoodAs: pendingTranscriptReview.suggestedText })
             speechFeedback.speak(message, {
               onEnd: () => {
                 if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -757,7 +762,7 @@ function App() {
         if (review) {
           const message = buildTranscriptReviewMessage(review)
           setPendingTranscriptReview(review)
-          setFeedbackMessage(message)
+          updateFeedback({ heardText: review.originalText, status: 'thinking', understoodAs: review.suggestedText })
           speechFeedback.speak(message, {
             onEnd: () => {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -768,6 +773,7 @@ function App() {
       }
 
       // Plan confirmation routing: confirm or cancel a pending plan
+      updateFeedback({ heardText: transcript })
       if (pendingPlan !== null) {
         if (/^(确认|开始画|可以|就这样|画吧|好|行)/.test(transcript.trim())) {
           executeApprovedPlan()
@@ -776,7 +782,7 @@ function App() {
         if (/^(取消|算了|重来|不要)/.test(transcript.trim())) {
           setPendingPlan(null)
           setPendingTranscriptReview(null)
-          setFeedbackMessage('好的，已取消。请重新描述你想画的内容。')
+          updateFeedback({ result: '好的，已取消', status: 'success', suggestion: '请重新描述你想画的内容' })
           speechFeedback.speak('好的，已取消。请重新描述你想画的内容。', {
             onEnd: () => {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -800,7 +806,7 @@ function App() {
         // 1. Exit commands
         if (/^(就这样|可以了|好了|算了|不画了)/.test(trimmed)) {
           setSketchMode(null)
-          setFeedbackMessage('好的，草图已确认')
+          updateFeedback({ result: '草图已确认', status: 'success' })
           speechFeedback.speak('好的，草图已确认', {
             onEnd: () => {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -815,14 +821,14 @@ function App() {
             const restored = sketchMode.lastSnapshot
             setSketchStrokes(restored.strokes)
             setSketchMode((prev) => prev ? { ...prev, rawStrokes: restored.rawStrokes, lastSnapshot: undefined } : null)
-            setFeedbackMessage('好的，已恢复到上一版')
+            updateFeedback({ result: '已恢复到上一版', status: 'success' })
             speechFeedback.speak('好的，已恢复到上一版', {
               onEnd: () => {
                 if (!speech.isManuallyPausedRef.current) speech.resumeListening()
               },
             })
           } else {
-            setFeedbackMessage('没有可恢复的上一版')
+            updateFeedback({ result: '没有可恢复的上一版', status: 'error' })
             speechFeedback.speak('没有可恢复的上一版', {
               onEnd: () => {
                 if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -836,9 +842,9 @@ function App() {
         const localAdj = parseLocalAdjustment(trimmed)
         if (localAdj) {
           setSketchStrokes((prev) => applyLocalAdjustment(prev, localAdj))
-          const feedback = getAdjustmentFeedback(localAdj)
-          setFeedbackMessage(feedback)
-          speechFeedback.speak(feedback, {
+          const adjFeedback = getAdjustmentFeedback(localAdj)
+          updateFeedback({ result: adjFeedback, status: 'success' })
+          speechFeedback.speak(adjFeedback, {
             onEnd: () => {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
             },
@@ -850,8 +856,8 @@ function App() {
         if (/宽松|太窄|太挤|散开|间距|文字居中|框太小|框压字|格子不对|不对|箭头|对齐|排版|重新排版|那里/.test(trimmed)) {
           if (sketchMode.approvedPlan?.intentType === 'flowchart') {
             if (llmStatus !== 'configured') {
-              setFeedbackMessage('这个调整需要先配置 LLM Key。你可以先试试说\"往右一点\"\"放大\"\"改颜色\"。')
-              speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说\"往右一点\"\"放大\"\"改颜色\"。', {
+              updateFeedback({ result: 'LLM Key 未配置', status: 'error', suggestion: '请先在设置页配置 LLM Key，或说"往右一点""放大"等简单调整' })
+              speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。', {
                 onEnd: () => {
                   if (!speech.isManuallyPausedRef.current) speech.resumeListening()
                 },
@@ -865,8 +871,8 @@ function App() {
           if (llmStatus === 'configured') {
             handleSketchEdit(transcript)
           } else {
-            setFeedbackMessage('这个调整需要先配置 LLM Key。你可以先试试说\"往右一点\"\"放大\"\"改颜色\"。')
-            speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说\"往右一点\"\"放大\"\"改颜色\"。', {
+            updateFeedback({ result: 'LLM Key 未配置', status: 'error', suggestion: '请先在设置页配置 LLM Key，或说"往右一点""放大"等简单调整' })
+            speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。', {
               onEnd: () => {
                 if (!speech.isManuallyPausedRef.current) speech.resumeListening()
               },
@@ -878,7 +884,7 @@ function App() {
         // 3b. Other complex adjustments that need LLM with vision
         if (/加细节|加一点|加些|再加|轮廓更清楚|改成更像|重新画|增加|删除|改得|我还想|帮我加|长一点|长一些|加长|短一点|短一些|缩短|重来/.test(trimmed)) {
           if (llmStatus !== 'configured') {
-            setFeedbackMessage('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。')
+            updateFeedback({ result: 'LLM Key 未配置', status: 'error', suggestion: '请先在设置页配置 LLM Key，或说"往右一点""放大"等简单调整' })
             speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。', {
               onEnd: () => {
                 if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -893,13 +899,13 @@ function App() {
         // 4. Falls through to routeCommands (may route to handleGenerateSketch → handleSketchEdit)
       }
 
-      setFeedbackMessage('思考中...')
+      updateFeedback({ status: 'thinking' })
 
       routeCommands(transcript).then((actions) => {
         // Clarification / refinement without context — prompt user to describe
         const clarifyAction = actions.find((a) => a.type === 'ask_clarification')
         if (clarifyAction) {
-          setFeedbackMessage('你想让我把哪张图说得更详细？请先描述要画的内容。')
+          updateFeedback({ result: '请先描述要画的内容', status: 'error', suggestion: '请先描述要画的内容' })
           speechFeedback.speak('你想让我把哪张图说得更详细？请先描述要画的内容。', {
             onEnd: () => {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -967,7 +973,7 @@ function App() {
           })
         }
         const message = getBatchFeedback(actions, rawText)
-        setFeedbackMessage(message)
+        updateFeedback({ result: message, status: 'success' })
         speechFeedback.speak(message, {
           onEnd: () => {
             if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -996,7 +1002,7 @@ function App() {
         } else {
           dispatch(action)
         }
-        setFeedbackMessage(message)
+        updateFeedback({ result: message, status: 'success' })
         speechFeedback.speak(message, {
           onEnd: () => {
             executeBatch(actions, index + 1)
@@ -1025,7 +1031,7 @@ function App() {
             setSketchMode(null)
             setPendingPlan(null)
             setPendingTranscriptReview(null)
-            setFeedbackMessage('已撤销草图')
+            updateFeedback({ result: '已撤销草图', status: 'success' })
             speechFeedback.speak('已撤销草图', {
               onEnd: () => {
                 if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -1074,8 +1080,6 @@ function App() {
                 isSupported={speech.isSupported}
                 onPauseListening={speech.pauseListening}
                 onResumeListening={speech.resumeListening}
-                feedbackMessage={feedbackMessage}
-                isFeedbackSpeaking={speechFeedback.isSpeaking}
               />
             </div>
 
@@ -1100,6 +1104,7 @@ function App() {
         <aside className="context-panel" aria-label="Context panel">
           <PlanCompanion plan={pendingPlan} />
           <ModePresetPanel mode={activeMode} />
+          <FeedbackPanel feedback={feedback} />
           <div className="panel-heading">
             <h2>Command History</h2>
           </div>

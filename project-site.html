@@ -1,0 +1,1137 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Say2Draw｜以声绘色</title>
+    <meta
+      name="description"
+      content="Say2Draw 是一款纯语音控制的 AI 绘图工具。说你想画的，系统听懂、计划、确认、执行，草图画出来你继续用语音打磨。"
+    />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f8fa;
+        --panel: #ffffff;
+        --panel-soft: #f0f3f7;
+        --ink: #1f2328;
+        --muted: #656d76;
+        --quiet: #8c959f;
+        --line: #d0d7de;
+        --line-soft: #e8ecf0;
+        --blue: #2563eb;
+        --blue-soft: #eaf1ff;
+        --green: #1a7f37;
+        --green-soft: #e9f7ee;
+        --yellow: #9a6700;
+        --yellow-soft: #fff7df;
+        --red: #cf222e;
+        --canvas: #fffdf8;
+        --shadow: 0 18px 50px rgba(31, 35, 40, 0.08);
+        --radius: 8px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        color: var(--ink);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 248, 250, 0.94)),
+          var(--bg);
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .site-header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        border-bottom: 1px solid var(--line);
+        background: rgba(246, 248, 250, 0.88);
+        backdrop-filter: blur(14px);
+      }
+
+      .nav {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+      }
+
+      .brand-mark {
+        width: 34px;
+        height: 34px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        display: grid;
+        place-items: center;
+        background: var(--panel);
+        color: var(--blue);
+        box-shadow: 0 1px 3px rgba(31, 35, 40, 0.04);
+      }
+
+      .brand-mark svg,
+      .icon svg {
+        width: 19px;
+        height: 19px;
+        stroke: currentColor;
+        stroke-width: 2;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .nav-links a {
+        padding: 8px 10px;
+        border-radius: 6px;
+      }
+
+      .nav-links a:hover {
+        background: var(--panel);
+        color: var(--ink);
+      }
+
+      .hero {
+        max-width: 1180px;
+        min-height: calc(100vh - 59px);
+        margin: 0 auto;
+        padding: 54px 20px 34px;
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
+        align-items: center;
+        gap: 42px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 14px;
+        padding: 6px 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 99px;
+        background: var(--green);
+        box-shadow: 0 0 0 4px var(--green-soft);
+      }
+
+      h1 {
+        margin: 0;
+        max-width: 690px;
+        font-size: clamp(42px, 6.2vw, 78px);
+        line-height: 0.96;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        margin: 22px 0 0;
+        max-width: 660px;
+        color: var(--muted);
+        font-size: 19px;
+        line-height: 1.75;
+      }
+
+      .hero-actions {
+        margin: 28px 0 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 42px;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+        color: var(--ink);
+        font-weight: 750;
+        box-shadow: 0 1px 3px rgba(31, 35, 40, 0.04);
+      }
+
+      .button.primary {
+        border-color: var(--blue);
+        background: var(--blue);
+        color: #fff;
+      }
+
+      .hero-proof {
+        margin: 24px 0 0;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .proof-item {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .proof-item strong {
+        display: block;
+        font-size: 22px;
+      }
+
+      .proof-item span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .demo-shell {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .window-bar {
+        height: 42px;
+        padding: 0 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel-soft);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .traffic {
+        display: flex;
+        gap: 7px;
+      }
+
+      .traffic span {
+        width: 10px;
+        height: 10px;
+        border-radius: 99px;
+        background: var(--line);
+      }
+
+      .demo-grid {
+        min-height: 520px;
+        display: grid;
+        grid-template-columns: 150px 1fr;
+      }
+
+      .demo-sidebar {
+        border-right: 1px solid var(--line);
+        background: #f0f2f5;
+        padding: 14px 10px;
+      }
+
+      .mode {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 7px;
+        padding: 9px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .mode.active {
+        border-color: var(--line);
+        background: var(--panel);
+        color: var(--blue);
+        font-weight: 750;
+      }
+
+      .demo-main {
+        padding: 16px;
+        background: #fbfcfd;
+      }
+
+      .demo-status {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .listening {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--green);
+        font-size: 13px;
+        font-weight: 750;
+      }
+
+      .pulse {
+        width: 9px;
+        height: 9px;
+        border-radius: 99px;
+        background: var(--green);
+        animation: pulse 1.45s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(26, 127, 55, 0.28);
+        }
+        50% {
+          box-shadow: 0 0 0 9px rgba(26, 127, 55, 0);
+        }
+      }
+
+      .canvas {
+        position: relative;
+        min-height: 310px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(rgba(37, 99, 235, 0.06) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(37, 99, 235, 0.06) 1px, transparent 1px),
+          var(--canvas);
+        background-size: 32px 32px;
+        overflow: hidden;
+      }
+
+      .canvas img {
+        position: absolute;
+        right: 18px;
+        bottom: 10px;
+        width: min(38%, 220px);
+        height: auto;
+        opacity: 0.96;
+        filter: drop-shadow(0 14px 20px rgba(31, 35, 40, 0.12));
+      }
+
+      .sketch-line {
+        position: absolute;
+        border: 3px solid #111827;
+        border-color: #111827 transparent transparent transparent;
+        border-radius: 50%;
+        transform: rotate(-10deg);
+        opacity: 0.86;
+      }
+
+      .sun {
+        position: absolute;
+        top: 42px;
+        left: 52px;
+        width: 70px;
+        height: 70px;
+        border: 4px solid #d97706;
+        border-radius: 50%;
+        background: #fff7cc;
+      }
+
+      .cloud {
+        position: absolute;
+        top: 75px;
+        left: 154px;
+        width: 118px;
+        height: 48px;
+        border: 3px solid #334155;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .mountain {
+        position: absolute;
+        left: 46px;
+        bottom: 44px;
+        width: 240px;
+        height: 120px;
+        border-left: 4px solid #1f2937;
+        border-bottom: 4px solid #1f2937;
+        transform: skewX(-28deg) rotate(5deg);
+      }
+
+      .label {
+        position: absolute;
+        padding: 4px 7px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.8);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .voice-card {
+        margin-top: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+        overflow: hidden;
+      }
+
+      .voice-row {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 12px;
+        padding: 10px 12px;
+        border-top: 1px solid var(--line-soft);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .voice-row:first-child {
+        border-top: 0;
+      }
+
+      .voice-row b {
+        color: var(--quiet);
+      }
+
+      main {
+        border-top: 1px solid var(--line);
+      }
+
+      section {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 74px 20px;
+      }
+
+      .section-head {
+        max-width: 780px;
+        margin-bottom: 28px;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: clamp(28px, 3vw, 42px);
+        line-height: 1.12;
+        letter-spacing: 0;
+      }
+
+      .section-head p {
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.75;
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .card {
+        min-height: 178px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 18px;
+        background: var(--panel);
+        box-shadow: 0 1px 3px rgba(31, 35, 40, 0.04);
+      }
+
+      .icon {
+        width: 36px;
+        height: 36px;
+        margin-bottom: 14px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .card h3 {
+        margin: 0;
+        font-size: 17px;
+      }
+
+      .card p {
+        margin: 10px 0 0;
+        color: var(--muted);
+        line-height: 1.65;
+        font-size: 14px;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 0.94fr 1.06fr;
+        gap: 18px;
+        align-items: stretch;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+        padding: 20px;
+      }
+
+      .pipeline {
+        display: grid;
+        gap: 10px;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        gap: 12px;
+        align-items: start;
+        padding: 13px;
+        border: 1px solid var(--line-soft);
+        border-radius: 7px;
+        background: #fbfcfd;
+      }
+
+      .step-num {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 7px;
+        background: var(--blue);
+        color: #fff;
+        font-weight: 800;
+      }
+
+      .step h3 {
+        margin: 0 0 4px;
+        font-size: 15px;
+      }
+
+      .step p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.55;
+        font-size: 14px;
+      }
+
+      .compare {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        font-size: 14px;
+      }
+
+      .compare th,
+      .compare td {
+        padding: 13px 12px;
+        border-bottom: 1px solid var(--line-soft);
+        text-align: left;
+        vertical-align: top;
+        line-height: 1.45;
+      }
+
+      .compare th {
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      .compare tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .tag {
+        display: inline-flex;
+        padding: 4px 7px;
+        border-radius: 6px;
+        background: var(--green-soft);
+        color: var(--green);
+        font-weight: 750;
+      }
+
+      .timeline {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .milestone {
+        border-left: 3px solid var(--blue);
+        border-radius: 0 var(--radius) var(--radius) 0;
+        padding: 14px 14px 14px 16px;
+        background: var(--panel);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+
+      .milestone strong {
+        display: block;
+      }
+
+      .milestone span {
+        display: block;
+        margin-top: 7px;
+        color: var(--muted);
+        line-height: 1.5;
+        font-size: 14px;
+      }
+
+      .commands {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .command-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .command-list li {
+        display: flex;
+        gap: 9px;
+        align-items: flex-start;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line-soft);
+        color: var(--muted);
+        line-height: 1.45;
+        font-size: 14px;
+      }
+
+      .command-list li:last-child {
+        border-bottom: 0;
+      }
+
+      .quote-mark {
+        color: var(--blue);
+        font-weight: 900;
+      }
+
+      .cta {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 18px;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 24px;
+        background: #111827;
+        color: #fff;
+      }
+
+      .cta h2 {
+        font-size: clamp(25px, 3vw, 38px);
+      }
+
+      .cta p {
+        margin: 10px 0 0;
+        color: #d1d5db;
+        line-height: 1.7;
+      }
+
+      .cta .button {
+        background: #fff;
+        color: #111827;
+        border-color: #fff;
+      }
+
+      .site-footer {
+        padding: 30px 20px 44px;
+        color: var(--muted);
+        text-align: center;
+        font-size: 13px;
+      }
+
+      @media (max-width: 980px) {
+        .hero,
+        .split,
+        .cta {
+          grid-template-columns: 1fr;
+        }
+
+        .demo-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .demo-sidebar {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .cards,
+        .timeline {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 720px) {
+        .nav {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .nav-links {
+          width: 100%;
+          overflow-x: auto;
+          padding-bottom: 3px;
+        }
+
+        .hero {
+          min-height: auto;
+          padding-top: 36px;
+        }
+
+        .hero-proof,
+        .cards,
+        .commands,
+        .timeline,
+        .demo-sidebar {
+          grid-template-columns: 1fr;
+        }
+
+        .canvas img {
+          width: 150px;
+          opacity: 0.82;
+        }
+
+        .voice-row {
+          grid-template-columns: 1fr;
+          gap: 3px;
+        }
+
+        section {
+          padding: 54px 18px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="页面导航">
+        <a class="brand" href="#top" aria-label="Say2Draw 首页">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 3v10" />
+              <path d="M8 7v4a4 4 0 0 0 8 0V7" />
+              <path d="M5 11a7 7 0 0 0 14 0" />
+              <path d="M12 18v3" />
+            </svg>
+          </span>
+          <span>Say2Draw</span>
+        </a>
+        <div class="nav-links">
+          <a href="#features">功能</a>
+          <a href="#pipeline">技术管线</a>
+          <a href="#stack">技术栈</a>
+          <a href="#difference">差异</a>
+          <a href="#commands">语音指令</a>
+          <a href="#process">开发过程</a>
+        </div>
+      </nav>
+    </header>
+
+    <div id="top" class="hero">
+      <div>
+        <p class="eyebrow">72 小时 AI 应用开发挑战作品</p>
+        <h1>Say2Draw｜以声绘色</h1>
+        <p class="lead">
+          纯语音控制的 AI 绘图工具。用户说出想画的内容，系统完成识别、计划、确认和执行，再把草图留在画布上，继续用自然语言逐轮打磨。
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="http://127.0.0.1:5173">
+            <span class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M5 12h14" />
+                <path d="m13 6 6 6-6 6" />
+              </svg>
+            </span>
+            打开应用
+          </a>
+          <a class="button" href="#pipeline">
+            <span class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M4 4h6v6H4z" />
+                <path d="M14 4h6v6h-6z" />
+                <path d="M9 10v4a2 2 0 0 0 2 2h3" />
+                <path d="M14 14h6v6h-6z" />
+              </svg>
+            </span>
+            看技术亮点
+          </a>
+        </div>
+        <div class="hero-proof" aria-label="项目数据">
+          <div class="proof-item">
+            <strong>26</strong>
+            <span>合并 PR，持续小步演进</span>
+          </div>
+          <div class="proof-item">
+            <strong>50×50</strong>
+            <span>SketchAgent 逻辑网格</span>
+          </div>
+          <div class="proof-item">
+            <strong>0</strong>
+            <span>绘图流程依赖鼠标键盘</span>
+          </div>
+        </div>
+      </div>
+
+      <aside class="demo-shell" aria-label="Say2Draw 应用预览">
+        <div class="window-bar">
+          <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+          <span>Voice Workbench Preview</span>
+        </div>
+        <div class="demo-grid">
+          <div class="demo-sidebar">
+            <div class="mode active">自由绘画</div>
+            <div class="mode">故事场景</div>
+            <div class="mode">课堂讲解</div>
+            <div class="mode">白板流程</div>
+          </div>
+          <div class="demo-main">
+            <div class="demo-status">
+              <span class="listening"><span class="pulse"></span>聆听中</span>
+              <span class="tag">计划→确认→执行</span>
+            </div>
+            <div class="canvas">
+              <div class="sun" aria-hidden="true"></div>
+              <div class="cloud" aria-hidden="true"></div>
+              <div class="mountain" aria-hidden="true"></div>
+              <div class="sketch-line" style="left: 210px; top: 174px; width: 168px; height: 76px;" aria-hidden="true"></div>
+              <div class="label" style="left: 54px; bottom: 28px;">山脉草图</div>
+              <div class="label" style="left: 50px; top: 119px;">太阳</div>
+              <img src="src/assets/hero.png" alt="Say2Draw 手绘风格示意图" />
+            </div>
+            <div class="voice-card">
+              <div class="voice-row">
+                <b>我听到</b>
+                <span>画一个小女孩站在月亮下面，再加两朵云</span>
+              </div>
+              <div class="voice-row">
+                <b>我理解为</b>
+                <span>故事场景：主体、月亮、云朵，自动分布避免重叠</span>
+              </div>
+              <div class="voice-row">
+                <b>执行结果</b>
+                <span>生成手绘笔触草图，可继续说“往右一点”“轮廓更清楚”</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <main>
+      <section id="features">
+        <div class="section-head">
+          <h2>不是文生图，是可控的语音绘图系统</h2>
+          <p>
+            Say2Draw 的核心是“系统谦逊”：AI 不假装一次画完，而是先给出可编辑的草图起点，让用户通过语音不断修正。
+          </p>
+        </div>
+        <div class="cards">
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 3v10" /><path d="M8 7v4a4 4 0 0 0 8 0V7" /><path d="M5 11a7 7 0 0 0 14 0" /></svg>
+            </div>
+            <h3>纯语音闭环</h3>
+            <p>自动持续监听、实时转写、语音反馈和回声保护，绘图操作不依赖鼠标键盘。</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 5h16" /><path d="M4 12h16" /><path d="M4 19h16" /></svg>
+            </div>
+            <h3>计划确认机制</h3>
+            <p>复杂指令先生成绘图计划，用户说“确认”后执行，降低误识别带来的误操作。</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 18c4-10 8-10 16-12" /><path d="M5 19c5-3 10-3 14 0" /></svg>
+            </div>
+            <h3>手绘笔触管线</h3>
+            <p>LLM 输出结构化笔触坐标，前端用 Bézier 曲线拟合，稳定生成草图质感。</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3 12h18" /><path d="M12 3v18" /><path d="M5 5h14v14H5z" /></svg>
+            </div>
+            <h3>局部可编辑</h3>
+            <p>支持撤销、恢复、移动、缩放、改色和视觉编辑，每一步都能累积在画布上。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="pipeline">
+        <div class="section-head">
+          <h2>SketchAgent：让 LLM 负责语义，让代码负责线条</h2>
+          <p>
+            项目的关键不是把 prompt 扔给图片生成模型，而是把自然语言转换成可审计、可恢复、可继续编辑的结构化绘图动作。
+            这条管线参考 SketchAgent 论文中的笔触表示与曲线拟合思路，并在 PR17 中落地为 50×50 网格坐标到 Bézier/SVG 的渲染流程。
+          </p>
+        </div>
+        <div class="split">
+          <div class="panel">
+            <div class="pipeline">
+              <div class="step">
+                <div class="step-num">1</div>
+                <div>
+                  <h3>语音识别与审查</h3>
+                  <p>Web Speech API 产出实时转写，并检测“换/话/化”等疑似误识别词。</p>
+                </div>
+              </div>
+              <div class="step">
+                <div class="step-num">2</div>
+                <div>
+                  <h3>本地解析优先</h3>
+                  <p>清空、撤销、移动、缩放、改色等指令直接本地执行，减少 LLM 成本。</p>
+                </div>
+              </div>
+              <div class="step">
+                <div class="step-num">3</div>
+                <div>
+                  <h3>LLM 计划与笔触 XML</h3>
+                  <p>复杂场景由模型拆解为计划或 50×50 网格上的结构化笔触。</p>
+                </div>
+              </div>
+              <div class="step">
+                <div class="step-num">4</div>
+                <div>
+                  <h3>Bézier 拟合渲染</h3>
+                  <p>前端把坐标采样点拟合为平滑 SVG path，叠加到 Canvas 工作区。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <table class="compare" aria-label="技术职责分工">
+              <thead>
+                <tr>
+                  <th>阶段</th>
+                  <th>职责</th>
+                  <th>执行者</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>语义理解</td>
+                  <td>判断画什么、在哪画、需要哪些元素</td>
+                  <td>LLM / 本地路由</td>
+                </tr>
+                <tr>
+                  <td>计划控制</td>
+                  <td>先说明绘图方案，等待用户语音确认</td>
+                  <td>React 状态机</td>
+                </tr>
+                <tr>
+                  <td>视觉品质</td>
+                  <td>网格坐标映射、曲线拟合、手绘线条渲染</td>
+                  <td>确定性代码</td>
+                </tr>
+                <tr>
+                  <td>迭代打磨</td>
+                  <td>“往右一点”“散开一点”“就这样”</td>
+                  <td>本地解析 + 快照</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="stack">
+        <div class="section-head">
+          <h2>技术栈</h2>
+          <p>
+            项目用浏览器原生语音能力连接 React 工作台、Express LLM 服务和 Canvas/SVG 渲染层，形成一条可运行、可解释、可继续迭代的语音绘图链路。
+          </p>
+        </div>
+        <div class="cards">
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 5h16v12H4z" /><path d="M8 21h8" /><path d="M12 17v4" /></svg>
+            </div>
+            <h3>前端</h3>
+            <p>React 19 + TypeScript + Vite 8 构建工作台，用 useReducer 管理绘图状态、历史记录和语音反馈。</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /><path d="M8 7v10" /></svg>
+            </div>
+            <h3>后端</h3>
+            <p>Express.js + OpenAI SDK 提供 OpenAI-compatible API 代理、模型配置接口和结构化绘图计划生成。</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 3v10" /><path d="M8 7v4a4 4 0 0 0 8 0V7" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>
+            </div>
+            <h3>语音与绘图</h3>
+            <p>Web Speech API 负责 SpeechRecognition 和 SpeechSynthesis，HTML5 Canvas 承载画布，SVG overlay 呈现手绘笔触。</p>
+          </article>
+          <article class="card">
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 18c4-10 8-10 16-12" /><path d="M5 19c5-3 10-3 14 0" /><path d="M7 7h4" /><path d="M13 7h4" /></svg>
+            </div>
+            <h3>AI 与渲染</h3>
+            <p>Mimo 多模态默认模型，兼容 OpenAI-compatible provider；SketchAgent 50×50 网格输出经 Bézier 曲线拟合渲染。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="difference">
+        <div class="section-head">
+          <h2>和 AI 文生图的根本区别</h2>
+          <p>Say2Draw 追求的是可控表达，而不是一次性生成一张不可拆开的图片。</p>
+        </div>
+        <div class="panel">
+          <table class="compare" aria-label="Say2Draw 与 AI 文生图对比">
+            <thead>
+              <tr>
+                <th>维度</th>
+                <th>AI 文生图</th>
+                <th>Say2Draw</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>执行单位</td>
+                <td>整张图片</td>
+                <td><span class="tag">结构化图形与笔触</span></td>
+              </tr>
+              <tr>
+                <td>迭代方式</td>
+                <td>重新生成整图</td>
+                <td>增量添加、局部修改、可撤销恢复</td>
+              </tr>
+              <tr>
+                <td>用户控制</td>
+                <td>靠 prompt 试错</td>
+                <td>自然语音逐轮指挥</td>
+              </tr>
+              <tr>
+                <td>响应速度</td>
+                <td>等待模型生成</td>
+                <td>本地动作实时执行，复杂动作按需调用 LLM</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="commands">
+        <div class="section-head">
+          <h2>语音能力展示</h2>
+          <p>这些示例说明系统如何把自然语言转成绘图计划、草图生成和后续打磨动作，用来展示完整的语音控制闭环。</p>
+        </div>
+        <div class="commands">
+          <div class="panel">
+            <h3>基础绘图</h3>
+            <ul class="command-list">
+              <li><span class="quote-mark">“</span><span>画一个红色圆形</span></li>
+              <li><span class="quote-mark">“</span><span>在左上角画一个蓝色矩形</span></li>
+              <li><span class="quote-mark">“</span><span>写上你好</span></li>
+              <li><span class="quote-mark">“</span><span>撤销上一步</span></li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>复杂场景</h3>
+            <ul class="command-list">
+              <li><span class="quote-mark">“</span><span>画一个小女孩站在月亮下面</span></li>
+              <li><span class="quote-mark">“</span><span>画太阳、地球和月亮，表示月亮绕地球转</span></li>
+              <li><span class="quote-mark">“</span><span>画一个从登录到支付的流程图</span></li>
+              <li><span class="quote-mark">“</span><span>确认，开始画</span></li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>草图打磨</h3>
+            <ul class="command-list">
+              <li><span class="quote-mark">“</span><span>往右一点，放大一点</span></li>
+              <li><span class="quote-mark">“</span><span>颜色改成蓝色</span></li>
+              <li><span class="quote-mark">“</span><span>轮廓更清楚，加一点细节</span></li>
+              <li><span class="quote-mark">“</span><span>就这样，可以了</span></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="process">
+        <div class="section-head">
+          <h2>72 小时内，小步 PR 交付</h2>
+          <p>项目遵守 PR 驱动开发：从工程骨架到语音闭环，再到 LLM、SketchAgent 和反馈面板，每个能力都有独立演进记录。</p>
+        </div>
+        <div class="timeline">
+          <div class="milestone">
+            <strong>PR 0-5</strong>
+            <span>治理文档、Vite 工程、Canvas 引擎、自动语音监听。</span>
+          </div>
+          <div class="milestone">
+            <strong>PR 6-10</strong>
+            <span>语音反馈闭环、本地解析、OpenAI-compatible 结构化解析。</span>
+          </div>
+          <div class="milestone">
+            <strong>PR 16-18</strong>
+            <span>Fallback Sketch Mode、Mimo 多模态、50×50 网格笔触管线。</span>
+          </div>
+          <div class="milestone">
+            <strong>PR 19-25</strong>
+            <span>计划确认、转录审查门、流程图结构化编辑、四段式反馈。</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="cta">
+          <div>
+            <h2>一句话总结</h2>
+            <p>
+              Say2Draw 不是“AI 替你画好”，而是“你指挥 AI，草图起步，一起打磨”。
+            </p>
+          </div>
+          <a class="button" href="http://127.0.0.1:5173">进入 Say2Draw 应用</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      Say2Draw｜React + TypeScript + Vite + Web Speech API + Canvas + SketchAgent
+    </footer>
+  </body>
+</html>

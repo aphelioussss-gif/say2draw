@@ -31,7 +31,13 @@ export function parseLocalCommand(
   const text = rawText.replace(/\s+/g, '').trim()
   const createdAt = options.createdAt ?? new Date().toISOString()
 
-  if (text.includes('清空画布') || text.includes('清除画布')) {
+  if (
+    text.includes('清空') ||
+    text.includes('清除') ||
+    text.includes('清屏') ||
+    text.includes('擦掉画布') ||
+    text.includes('擦除画布')
+  ) {
     return {
       ok: true,
       action: {

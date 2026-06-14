@@ -976,6 +976,13 @@ function cleanFlowStep(value: string): string {
 }
 
 function inferFlowSteps(text: string, plan: SketchPlan): string[] {
+  // 1. Confirmed plan elements take priority — avoid re-interpretation from raw text
+  const planSteps = plan.elements
+    .map((element) => cleanFlowStep(element.name))
+    .filter(Boolean)
+  if (planSteps.length >= 3) return Array.from(new Set(planSteps))
+
+  // 2. from-to regex fallback (only when plan is insufficient)
   const fromToMatch = text.match(/从(.+?)到(.+?)(?:的|流程图|流程|$)/)
   if (fromToMatch) {
     const start = cleanFlowStep(fromToMatch[1])
@@ -983,6 +990,7 @@ function inferFlowSteps(text: string, plan: SketchPlan): string[] {
     if (start && end && start !== end) return [start, end]
   }
 
+  // 3. Keyword matching fallback
   const orderedKeywords = [
     { pattern: /注册/, label: '注册' },
     { pattern: /登录|登陆/, label: '登录' },
@@ -997,9 +1005,7 @@ function inferFlowSteps(text: string, plan: SketchPlan): string[] {
 
   if (keywordSteps.length >= 2) return Array.from(new Set(keywordSteps))
 
-  const planSteps = plan.elements
-    .map((element) => cleanFlowStep(element.name))
-    .filter(Boolean)
+  // 4. Last resort: plan steps (2) or default
   if (planSteps.length >= 2) return Array.from(new Set(planSteps))
 
   return ['开始', '处理', '完成']
@@ -1057,18 +1063,20 @@ function downArrowStrokes(x: number, fromY: number, toY: number): FallbackSketch
 }
 
 function createFlowchartSketchXML(text: string, plan: SketchPlan): string {
-  const steps = inferFlowSteps(text, plan).slice(0, 5)
+  const steps = inferFlowSteps(text, plan).slice(0, 6)
   const count = Math.max(2, steps.length)
-  const left = count <= 2 ? 16 : 8
-  const right = count <= 2 ? 34 : 42
+  const isMany = count >= 5
+  const left = count <= 2 ? 16 : isMany ? 5 : 8
+  const right = count <= 2 ? 34 : isMany ? 45 : 42
   const gap = count === 1 ? 0 : (right - left) / (count - 1)
   const y = 25
+  const nodeWidth = count <= 3 ? 11 : isMany ? 7 : 9
   const nodeCenters = steps.map((_, index) => [left + gap * index, y] as [number, number])
   const strokes: FallbackSketchStroke[] = []
 
   steps.forEach((step, index) => {
     const [cx, cy] = nodeCenters[index]
-    strokes.push(nodeBoxStroke(step, cx, cy, count <= 3 ? 11 : 9, 8))
+    strokes.push(nodeBoxStroke(step, cx, cy, nodeWidth, 8))
     if (index < steps.length - 1) {
       strokes.push(...arrowStrokes(cx, nodeCenters[index + 1][0], cy))
     }
@@ -1504,6 +1512,17 @@ app.post('/api/sketch', async (req, res) => {
       sketch: createFallbackSketchXML(text, approvedPlan),
       warning: 'LLM not configured; used fallback sketch',
     })
+  }
+
+  // Deterministic rendering for confirmed flowchart plans avoids LLM re-interpretation
+  if (approvedPlan && typeof approvedPlan === 'object') {
+    const ap = approvedPlan as Record<string, unknown>
+    if (ap.intentType === 'flowchart' && Array.isArray(ap.elements) && ap.elements.length >= 3) {
+      return res.json({
+        ok: true,
+        sketch: createFallbackSketchXML(text, approvedPlan),
+      })
+    }
   }
 
   try {

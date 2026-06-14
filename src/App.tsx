@@ -601,7 +601,36 @@ function App() {
         }
       }
 
-      console.warn('[SketchEdit] Edit failed:', { instruction, accumulate, ok: data.ok, hasSketch: !!data.sketch, error: data.error })
+      // Handle structured error codes from server
+      if (data.code === 'LLM_NOT_CONFIGURED') {
+        setFeedbackMessage('需要先配置 LLM Key 才能进行复杂调整。你可以先试试说"往右一点""放大""改颜色"。')
+        speechFeedback.speak('需要先配置 LLM Key 才能进行复杂调整。你可以先试试说"往右一点""放大""改颜色"。', {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+        return
+      }
+      if (data.code === 'VISION_NOT_SUPPORTED') {
+        setFeedbackMessage('当前模型不支持图片输入，请到设置页换一个支持视觉的模型。')
+        speechFeedback.speak('当前模型不支持图片输入，请到设置页换一个支持视觉的模型。', {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+        return
+      }
+      if (data.code === 'INVALID_XML') {
+        setFeedbackMessage('模型返回格式错误，请重试或换一种说法。')
+        speechFeedback.speak('模型返回格式错误，请重试或换一种说法。', {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+        return
+      }
+
+      console.warn('[SketchEdit] Edit failed:', { instruction, accumulate, ok: data.ok, hasSketch: !!data.sketch, error: data.error, code: data.code })
       setFeedbackMessage('调整失败，请重试')
       speechFeedback.speak('调整失败，请重试', {
         onEnd: () => {
@@ -733,8 +762,17 @@ function App() {
           return
         }
 
-        // 3. Other sketch-mode edits that need LLM (loose match anywhere in transcript)
-        if (/长一点|长一些|加长|短一点|短一些|缩短|重来/.test(trimmed)) {
+        // 3. Complex adjustments that need LLM with vision (add detail / reshape / redo)
+        if (/加细节|加一点|加些|再加|轮廓更清楚|改成更像|重新画|增加|删除|改得|我还想|帮我加|长一点|长一些|加长|短一点|短一些|缩短|重来/.test(trimmed)) {
+          if (llmStatus !== 'configured') {
+            setFeedbackMessage('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。')
+            speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。', {
+              onEnd: () => {
+                if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+              },
+            })
+            return
+          }
           handleSketchEdit(transcript)
           return
         }

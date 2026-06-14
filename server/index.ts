@@ -1588,7 +1588,7 @@ app.post('/api/sketch-edit', async (req, res) => {
 
   const client = getOpenAIClient()
   if (!client) {
-    return res.json({ ok: false, error: 'LLM not configured' })
+    return res.json({ ok: false, code: 'LLM_NOT_CONFIGURED', error: 'LLM not configured' })
   }
 
   const isAccumulate = accumulate === true
@@ -1632,11 +1632,20 @@ Output the COMPLETE updated strokes. Keep all unrelated strokes unchanged, only 
       return res.json({ ok: false, error: 'No response from LLM' })
     }
 
+    if (!/<strokes>[\s\S]*?<\/strokes>/.test(content)) {
+      console.warn('[SketchEdit] Invalid XML response:', content.slice(0, 200))
+      return res.json({ ok: false, code: 'INVALID_XML', error: 'Model returned non-XML response' })
+    }
+
     console.log('[SketchEdit] Response', content.slice(0, 200))
     return res.json({ ok: true, sketch: content })
   } catch (error) {
     console.error('[SketchEdit] API error:', error)
-    return res.json({ ok: false, error: String(error).slice(0, 200) })
+    const msg = String(error)
+    if (/image_url|vision|multimodal|content type|unsupported.*image/i.test(msg)) {
+      return res.json({ ok: false, code: 'VISION_NOT_SUPPORTED', error: 'Model does not support image input' })
+    }
+    return res.json({ ok: false, error: msg.slice(0, 200) })
   }
 })
 

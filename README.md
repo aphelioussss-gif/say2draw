@@ -224,7 +224,7 @@ PR 25    反馈面板重构 + VoiceStatusBar 简化（视图层）
 
 ## Demo
 
-*Demo 视频待录制*
+[观看 Demo 演示](https://my.feishu.cn/minutes/obcn8hs6yv458129861b78pr?from=from_copylink)
 
 ## 许可证
 

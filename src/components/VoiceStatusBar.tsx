@@ -4,6 +4,10 @@ type VoiceStatusBarProps = {
   status: VoiceStatus
   interimTranscript: string
   finalTranscript: string
+  transcriptReview?: {
+    originalText: string
+    suggestedText?: string
+  } | null
   errorMessage: string
   isSupported: boolean
   onPauseListening: () => void
@@ -29,6 +33,7 @@ export function VoiceStatusBar({
   status,
   interimTranscript,
   finalTranscript,
+  transcriptReview,
   errorMessage,
   isSupported,
   onPauseListening,
@@ -50,6 +55,14 @@ export function VoiceStatusBar({
         <span className={`voice-status-transcript ${interimTranscript ? 'interim' : ''}`}>
           {displayText}
         </span>
+        {transcriptReview && (
+          <span className="voice-transcript-review">
+            <span>我听到：{transcriptReview.originalText}</span>
+            {transcriptReview.suggestedText && (
+              <span>建议：{transcriptReview.suggestedText}</span>
+            )}
+          </span>
+        )}
       </div>
 
       <div className="voice-status-right">

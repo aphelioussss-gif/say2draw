@@ -11,7 +11,7 @@ export type VoiceStatus =
 
 type SpeechRecognitionHookOptions = {
   lang?: string
-  onFinalTranscript?: (transcript: string) => void
+  onFinalTranscript?: (transcript: string, metadata?: { confidence?: number }) => void
   shouldIgnoreResult?: () => boolean
 }
 
@@ -19,6 +19,7 @@ type SpeechRecognitionResult = {
   status: VoiceStatus
   interimTranscript: string
   finalTranscript: string
+  finalConfidence?: number
   errorMessage: string
   isSupported: boolean
   pauseListening: (options?: { manual?: boolean }) => void
@@ -98,6 +99,7 @@ export function useSpeechRecognition({
   )
   const [interimTranscript, setInterimTranscript] = useState('')
   const [finalTranscript, setFinalTranscript] = useState('')
+  const [finalConfidence, setFinalConfidence] = useState<number | undefined>()
   const [errorMessage, setErrorMessage] = useState(() =>
     isSupported ? '' : '当前浏览器不支持 Web Speech API，建议使用 Chrome。',
   )
@@ -182,10 +184,12 @@ export function useSpeechRecognition({
 
       let interimText = ''
       let finalText = ''
+      let finalConfidenceValues: number[] = []
 
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const result = event.results[index]
-        const transcript = result[0]?.transcript.trim()
+        const alternative = result[0]
+        const transcript = alternative?.transcript.trim()
 
         if (!transcript) {
           continue
@@ -193,6 +197,9 @@ export function useSpeechRecognition({
 
         if (result.isFinal) {
           finalText += transcript
+          if (typeof alternative.confidence === 'number') {
+            finalConfidenceValues = [...finalConfidenceValues, alternative.confidence]
+          }
         } else {
           interimText += transcript
         }
@@ -204,6 +211,10 @@ export function useSpeechRecognition({
         // Accumulate and wait for silence before processing
         speechBufferRef.current += finalText
         setFinalTranscript(speechBufferRef.current)
+        const confidence = finalConfidenceValues.length > 0
+          ? Math.min(...finalConfidenceValues)
+          : undefined
+        setFinalConfidence(confidence)
         setStatus('processing')
 
         if (silenceTimerRef.current) {
@@ -212,8 +223,9 @@ export function useSpeechRecognition({
 
         silenceTimerRef.current = setTimeout(() => {
           const completeText = speechBufferRef.current
+          const completeConfidence = confidence
           speechBufferRef.current = ''
-          onFinalTranscriptRef.current?.(completeText)
+          onFinalTranscriptRef.current?.(completeText, { confidence: completeConfidence })
           window.setTimeout(() => {
             if (shouldListenRef.current) {
               setStatus('listening')
@@ -275,6 +287,7 @@ export function useSpeechRecognition({
     status,
     interimTranscript,
     finalTranscript,
+    finalConfidence,
     errorMessage,
     isSupported,
     pauseListening,

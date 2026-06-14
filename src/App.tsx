@@ -40,6 +40,89 @@ import {
 import './App.css'
 
 const GRID_RES = 50
+const LOW_TRANSCRIPT_CONFIDENCE = 0.65
+
+type TranscriptReview = {
+  originalText: string
+  suggestedText?: string
+  reason: 'ambiguous_draw_verb' | 'low_confidence'
+}
+
+function normalizeVoiceText(text: string): string {
+  return text.trim().replace(/[\s，,。.!！?？]/g, '')
+}
+
+function createDrawVerbSuggestion(text: string): string | null {
+  const normalized = normalizeVoiceText(text)
+  const corrected = normalized
+    .replace(/换(?=一只|一个|一张|张|个)/, '画')
+    .replace(/话(?=一只|一个|一张|张|个)/, '画')
+    .replace(/化(?=一只|一个|一张|张|个)/, '画')
+
+  return corrected !== normalized ? corrected : null
+}
+
+function isLocalSystemCommand(text: string): boolean {
+  return /^(清空|清除|擦掉|撤销|后退|取消|算了|重来|不要|确认|开始画|可以|就这样|好|行)/.test(normalizeVoiceText(text))
+}
+
+function shouldReviewTranscript(
+  text: string,
+  confidence: number | undefined,
+  hasEditableContext: boolean,
+): TranscriptReview | null {
+  if (hasEditableContext || isLocalSystemCommand(text)) {
+    return null
+  }
+
+  const suggestedText = createDrawVerbSuggestion(text)
+  if (suggestedText) {
+    return {
+      originalText: normalizeVoiceText(text),
+      suggestedText,
+      reason: 'ambiguous_draw_verb',
+    }
+  }
+
+  if (typeof confidence === 'number' && confidence < LOW_TRANSCRIPT_CONFIDENCE) {
+    return {
+      originalText: normalizeVoiceText(text),
+      reason: 'low_confidence',
+    }
+  }
+
+  return null
+}
+
+function parseTranscriptCorrection(review: TranscriptReview, spokenText: string): string | null {
+  const normalized = normalizeVoiceText(spokenText)
+  const original = review.originalText
+  const explicitReplacement =
+    normalized.match(/^不是(.+?)是(.+)$/) ??
+    normalized.match(/^把(.+?)改成(.+)$/) ??
+    normalized.match(/^把(.+?)换成(.+)$/)
+
+  if (explicitReplacement) {
+    const [, from, to] = explicitReplacement
+    if (from && to && original.includes(from)) {
+      return original.replace(from, to)
+    }
+  }
+
+  if (/^(画|帮我画|请画|请你画|给我画)/.test(normalized)) {
+    return normalized
+  }
+
+  return null
+}
+
+function buildTranscriptReviewMessage(review: TranscriptReview): string {
+  if (review.suggestedText) {
+    return `我听到：${review.originalText}。是不是想说：${review.suggestedText}？说确认按建议继续，或说重说。`
+  }
+
+  return `我听到：${review.originalText}。这句可能没听清，说确认继续，或说重说。`
+}
 
 function getSketchPixelBounds(strokes: ControlPoint[][]) {
   let minX = Number.POSITIVE_INFINITY
@@ -169,6 +252,7 @@ function App() {
     elements: Array<{ name: string; position: string; color: string; role: string; details?: string[] }>
   }
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null)
+  const [pendingTranscriptReview, setPendingTranscriptReview] = useState<TranscriptReview | null>(null)
 
   // ---- Current drawing mode (only meaningful on drawing pages) ----
   const activeMode: DrawingMode = isDrawingMode(activePage) ? activePage : 'story_scene'
@@ -540,8 +624,58 @@ function App() {
 
   const speech = useSpeechRecognition({
     shouldIgnoreResult: () => speechFeedback.isSpeaking,
-    onFinalTranscript: (transcript) => {
+    onFinalTranscript: (rawTranscript, metadata) => {
       speech.pauseListening({ manual: false })
+      let transcript = rawTranscript
+      const trimmedTranscript = normalizeVoiceText(rawTranscript)
+
+      if (pendingTranscriptReview) {
+        if (/^(确认|对|是的|按这个|继续|可以|好|行)$/.test(trimmedTranscript)) {
+          transcript = pendingTranscriptReview.suggestedText ?? pendingTranscriptReview.originalText
+          setPendingTranscriptReview(null)
+        } else if (/^(重说|不对|重新听|重新识别|听错了|不是)$/.test(trimmedTranscript)) {
+          setPendingTranscriptReview(null)
+          setFeedbackMessage('好的，请重新说一遍绘画指令。')
+          speechFeedback.speak('好的，请重新说一遍绘画指令。', {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        } else {
+          const correctedText = parseTranscriptCorrection(pendingTranscriptReview, rawTranscript)
+          if (correctedText) {
+            transcript = correctedText
+            setPendingTranscriptReview(null)
+          } else {
+            const message = buildTranscriptReviewMessage(pendingTranscriptReview)
+            setFeedbackMessage(message)
+            speechFeedback.speak(message, {
+              onEnd: () => {
+                if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+              },
+            })
+            return
+          }
+        }
+      } else {
+        const review = shouldReviewTranscript(
+          rawTranscript,
+          metadata?.confidence,
+          pendingPlan !== null || sketchMode !== null,
+        )
+        if (review) {
+          const message = buildTranscriptReviewMessage(review)
+          setPendingTranscriptReview(review)
+          setFeedbackMessage(message)
+          speechFeedback.speak(message, {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+      }
 
       // Plan confirmation routing: confirm or cancel a pending plan
       if (pendingPlan !== null) {
@@ -551,6 +685,7 @@ function App() {
         }
         if (/^(取消|算了|重来|不要)/.test(transcript.trim())) {
           setPendingPlan(null)
+          setPendingTranscriptReview(null)
           setFeedbackMessage('好的，已取消。请重新描述你想画的内容。')
           speechFeedback.speak('好的，已取消。请重新描述你想画的内容。', {
             onEnd: () => {
@@ -729,6 +864,7 @@ function App() {
           setSketchStrokes([])
           setSketchMode(null)
           setPendingPlan(null)
+          setPendingTranscriptReview(null)
           return false
         }
 
@@ -737,6 +873,7 @@ function App() {
             setSketchStrokes([])
             setSketchMode(null)
             setPendingPlan(null)
+            setPendingTranscriptReview(null)
             setFeedbackMessage('已撤销草图')
             speechFeedback.speak('已撤销草图', {
               onEnd: () => {
@@ -781,6 +918,7 @@ function App() {
                 status={speech.status}
                 interimTranscript={speech.interimTranscript}
                 finalTranscript={speech.finalTranscript}
+                transcriptReview={pendingTranscriptReview}
                 errorMessage={speech.errorMessage}
                 isSupported={speech.isSupported}
                 onPauseListening={speech.pauseListening}

@@ -234,6 +234,9 @@ function App() {
   const [sketchMode, setSketchMode] = useState<{
     concept: string
     rawStrokes: RawStroke[]
+    approvedPlan?: PendingPlan
+    flowchartModel?: { nodes: Array<{ label: string; cx: number; cy: number; width: number; height: number }>; totalWidth: number; centerY: number }
+    lastSnapshot?: { strokes: RenderedStroke[]; rawStrokes: RawStroke[] }
   } | null>(null)
   const [, setIsGeneratingSketch] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -514,7 +517,7 @@ function App() {
         if (parsed && parsed.strokes.length > 0) {
           const rendered = fitAndRenderStrokes(parsed.strokes)
           setSketchStrokes(rendered)
-          setSketchMode({ concept: parsed.concept, rawStrokes: parsed.strokes })
+          setSketchMode({ concept: parsed.concept, rawStrokes: parsed.strokes, approvedPlan: plan, flowchartModel: data.model })
 
           dispatch({
             type: 'generate_sketch',
@@ -549,6 +552,64 @@ function App() {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
       })
+    } finally {
+      setIsGeneratingSketch(false)
+    }
+  }
+
+  // ---- Flowchart layout adjustment (LLM understands intent, code renders deterministically) ----
+
+  async function handleFlowchartLayoutAdjust(instruction: string) {
+    if (!sketchMode?.approvedPlan) return
+
+    // Save snapshot for undo before applying changes
+    const snapshot = { strokes: [...sketchStrokes], rawStrokes: [...(sketchMode.rawStrokes || [])] }
+    setSketchMode((prev) => prev ? { ...prev, lastSnapshot: snapshot } : null)
+
+    setIsGeneratingSketch(true)
+    setFeedbackMessage('正在理解你的意思...')
+
+    try {
+      const res = await fetch('/api/sketch-flowchart-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan: sketchMode.approvedPlan,
+          instruction,
+          currentModel: sketchMode.flowchartModel,
+        }),
+      })
+      const data = await res.json()
+
+      if (data.ok && data.sketch) {
+        const parsed = parseSketchXML(data.sketch, GRID_RES)
+        if (parsed && parsed.strokes.length > 0) {
+          const rendered = fitAndRenderStrokes(parsed.strokes)
+          setSketchStrokes(rendered)
+          setSketchMode((prev) => prev ? {
+            ...prev,
+            rawStrokes: parsed.strokes,
+            flowchartModel: data.model || prev.flowchartModel,
+          } : null)
+
+          const feedback = data.explanation || `好的，已按你"${instruction}"调整了流程图布局`
+          setFeedbackMessage(feedback)
+          speechFeedback.speak(feedback, {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+      }
+
+      console.warn('[FlowchartLayout] Failed:', { ok: data.ok, hasSketch: !!data.sketch, error: data.error })
+      setFeedbackMessage('流程图调整失败，请重试')
+      speechFeedback.speak('流程图调整失败，请重试')
+    } catch (error) {
+      console.error('[FlowchartLayout] Error:', error)
+      setFeedbackMessage('网络错误，请重试')
+      speechFeedback.speak('网络错误，请重试')
     } finally {
       setIsGeneratingSketch(false)
     }
@@ -601,7 +662,36 @@ function App() {
         }
       }
 
-      console.warn('[SketchEdit] Edit failed:', { instruction, accumulate, ok: data.ok, hasSketch: !!data.sketch, error: data.error })
+      // Handle structured error codes from server
+      if (data.code === 'LLM_NOT_CONFIGURED') {
+        setFeedbackMessage('需要先配置 LLM Key 才能进行复杂调整。你可以先试试说"往右一点""放大""改颜色"。')
+        speechFeedback.speak('需要先配置 LLM Key 才能进行复杂调整。你可以先试试说"往右一点""放大""改颜色"。', {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+        return
+      }
+      if (data.code === 'VISION_NOT_SUPPORTED') {
+        setFeedbackMessage('当前模型不支持图片输入，请到设置页换一个支持视觉的模型。')
+        speechFeedback.speak('当前模型不支持图片输入，请到设置页换一个支持视觉的模型。', {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+        return
+      }
+      if (data.code === 'INVALID_XML') {
+        setFeedbackMessage('模型没返回可画的格式，请说"重新排版流程图"再试一次。')
+        speechFeedback.speak('模型没返回可画的格式，请说重新排版流程图再试一次。', {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+        return
+      }
+
+      console.warn('[SketchEdit] Edit failed:', { instruction, accumulate, ok: data.ok, hasSketch: !!data.sketch, error: data.error, code: data.code })
       setFeedbackMessage('调整失败，请重试')
       speechFeedback.speak('调整失败，请重试', {
         onEnd: () => {
@@ -719,6 +809,29 @@ function App() {
           return
         }
 
+        // 1b. Undo / restore previous version
+        if (/^(恢复上一版|撤回刚才|还原|撤销|后退)/.test(trimmed)) {
+          if (sketchMode.lastSnapshot) {
+            const restored = sketchMode.lastSnapshot
+            setSketchStrokes(restored.strokes)
+            setSketchMode((prev) => prev ? { ...prev, rawStrokes: restored.rawStrokes, lastSnapshot: undefined } : null)
+            setFeedbackMessage('好的，已恢复到上一版')
+            speechFeedback.speak('好的，已恢复到上一版', {
+              onEnd: () => {
+                if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+              },
+            })
+          } else {
+            setFeedbackMessage('没有可恢复的上一版')
+            speechFeedback.speak('没有可恢复的上一版', {
+              onEnd: () => {
+                if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+              },
+            })
+          }
+          return
+        }
+
         // 2. Local deterministic adjustments (move/scale/color) — no LLM
         const localAdj = parseLocalAdjustment(trimmed)
         if (localAdj) {
@@ -733,8 +846,46 @@ function App() {
           return
         }
 
-        // 3. Other sketch-mode edits that need LLM (loose match anywhere in transcript)
-        if (/长一点|长一些|加长|短一点|短一些|缩短|重来/.test(trimmed)) {
+        // 3a. Flowchart layout adjustments — LLM understands intent, code renders deterministically
+        if (/宽松|太窄|太挤|散开|间距|文字居中|框太小|框压字|格子不对|不对|箭头|对齐|排版|重新排版|那里/.test(trimmed)) {
+          if (sketchMode.approvedPlan?.intentType === 'flowchart') {
+            if (llmStatus !== 'configured') {
+              setFeedbackMessage('这个调整需要先配置 LLM Key。你可以先试试说\"往右一点\"\"放大\"\"改颜色\"。')
+              speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说\"往右一点\"\"放大\"\"改颜色\"。', {
+                onEnd: () => {
+                  if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+                },
+              })
+              return
+            }
+            handleFlowchartLayoutAdjust(transcript)
+            return
+          }
+          // Non-flowchart sketch — treat layout as general vision edit
+          if (llmStatus === 'configured') {
+            handleSketchEdit(transcript)
+          } else {
+            setFeedbackMessage('这个调整需要先配置 LLM Key。你可以先试试说\"往右一点\"\"放大\"\"改颜色\"。')
+            speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说\"往右一点\"\"放大\"\"改颜色\"。', {
+              onEnd: () => {
+                if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+              },
+            })
+          }
+          return
+        }
+
+        // 3b. Other complex adjustments that need LLM with vision
+        if (/加细节|加一点|加些|再加|轮廓更清楚|改成更像|重新画|增加|删除|改得|我还想|帮我加|长一点|长一些|加长|短一点|短一些|缩短|重来/.test(trimmed)) {
+          if (llmStatus !== 'configured') {
+            setFeedbackMessage('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。')
+            speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。', {
+              onEnd: () => {
+                if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+              },
+            })
+            return
+          }
           handleSketchEdit(transcript)
           return
         }

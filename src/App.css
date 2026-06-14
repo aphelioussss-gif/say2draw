@@ -318,6 +318,29 @@
   font-style: italic;
 }
 
+.voice-transcript-review {
+  min-width: 180px;
+  max-width: 360px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(154, 103, 0, 0.28);
+  background: rgba(154, 103, 0, 0.08);
+  color: var(--accent-yellow);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.voice-transcript-review span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .voice-status-right {
   display: flex;
   align-items: center;

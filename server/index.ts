@@ -1062,36 +1062,6 @@ function downArrowStrokes(x: number, fromY: number, toY: number): FallbackSketch
   ]
 }
 
-function createFlowchartSketchXML(text: string, plan: SketchPlan, layout?: FlowchartLayoutOverrides): string {
-  const steps = inferFlowSteps(text, plan).slice(0, 6)
-  const count = Math.max(2, steps.length)
-  const isMany = count >= 5
-  const spreadFactor = layout?.horizontalSpread ?? 1.0
-  const left = count <= 2 ? 16 : isMany ? 5 : 8
-  const right = count <= 2 ? 34 : isMany ? 45 : 42
-  const gap = count === 1 ? 0 : ((right - left) / (count - 1)) * spreadFactor
-  const y = layout?.centerY ?? 25
-  const baseWidth = count <= 3 ? 11 : isMany ? 7 : 9
-  const nodeWidth = Math.round(baseWidth * (layout?.nodeWidthMultiplier ?? 1.0))
-  const nodeHeight = layout?.nodeHeight ?? 8
-  const nodeCenters = steps.map((_, index) => [left + gap * index, y] as [number, number])
-  const strokes: FallbackSketchStroke[] = []
-
-  steps.forEach((step, index) => {
-    const [cx, cy] = nodeCenters[index]
-    strokes.push(nodeBoxStroke(step, cx, cy, nodeWidth, nodeHeight))
-    if (index < steps.length - 1) {
-      strokes.push(...arrowStrokes(cx, nodeCenters[index + 1][0], cy))
-    }
-  })
-
-  return `<thinking>Local fallback flowchart: ${escapeXml(steps.join(' -> '))}.</thinking>
-<concept>${escapeXml(plan.previewText || text)}</concept>
-<strokes>
-${strokes.map((stroke, index) => strokeToXml(stroke, index + 1)).join('\n')}
-</strokes>`
-}
-
 function funnelLayerStroke(label: string, cx: number, cy: number, topWidth: number, bottomWidth: number, height: number, color?: string): FallbackSketchStroke {
   const topY = cy + height / 2
   const bottomY = cy - height / 2
@@ -1111,15 +1081,90 @@ function funnelLayerStroke(label: string, cx: number, cy: number, topWidth: numb
   }
 }
 
+// ---- Flowchart structured model ----
+type FlowchartNode = {
+  label: string
+  cx: number
+  cy: number
+  width: number
+  height: number
+}
+
+type FlowchartModel = {
+  nodes: FlowchartNode[]
+  totalWidth: number
+  centerY: number
+}
+
+function computeFlowchartLayout(plan: SketchPlan, text: string, overrides?: FlowchartLayoutOverrides): FlowchartModel {
+  const steps = inferFlowSteps(text, plan).slice(0, 6)
+  const count = steps.length
+  const MIN_GAP = 3
+  const nodeHeight = overrides?.nodeHeight ?? 8
+  const centerY = overrides?.centerY ?? 25
+  const spreadFactor = overrides?.horizontalSpread ?? 1.0
+  const widthMultiplier = overrides?.nodeWidthMultiplier ?? 1.0
+
+  // Per-node width based on label length (Chinese chars ~2 grid units each + padding)
+  const nodes: FlowchartNode[] = steps.map((label) => {
+    const charCount = label.length
+    const baseWidth = Math.max(7, charCount * 2.0 + 3)
+    return {
+      label,
+      width: Math.round(baseWidth * widthMultiplier),
+      height: nodeHeight,
+      cx: 0,
+      cy: centerY,
+    }
+  })
+
+  // Total layout width
+  const totalWidth = nodes.reduce((sum, n) => sum + n.width, 0) + (count - 1) * MIN_GAP * spreadFactor
+
+  // Center the layout on the grid
+  let cx = Math.max(2, Math.round((GRID_RES - totalWidth) / 2))
+  const positioned: FlowchartNode[] = nodes.map((n) => {
+    const node: FlowchartNode = { ...n, cx: cx + n.width / 2 }
+    cx += n.width + MIN_GAP * spreadFactor
+    return node
+  })
+
+  return { nodes: positioned, totalWidth, centerY }
+}
+
+function renderFlowchartModel(model: FlowchartModel, plan: SketchPlan): string {
+  const strokes: FallbackSketchStroke[] = []
+
+  model.nodes.forEach((node, i) => {
+    strokes.push(nodeBoxStroke(node.label, node.cx, node.cy, node.width, node.height))
+    if (i < model.nodes.length - 1) {
+      const next = model.nodes[i + 1]
+      const fromX = node.cx + node.width / 2
+      const toX = next.cx - next.width / 2
+      strokes.push(...arrowStrokes(fromX, toX, node.cy))
+    }
+  })
+
+  const labels = model.nodes.map((n) => n.label).join(' -> ')
+  return `<thinking>Flowchart layout: ${escapeXml(labels)}.</thinking>
+<concept>${escapeXml(plan.previewText || labels)}</concept>
+<strokes>
+${strokes.map((s, i) => strokeToXml(s, i + 1)).join('\n')}
+</strokes>`
+}
+
 type FlowchartLayoutOverrides = {
   horizontalSpread?: number
   nodeWidthMultiplier?: number
   nodeHeight?: number
-  centerX?: number
   centerY?: number
 }
 
-function createFunnelSketchXML(text: string, plan: SketchPlan): string {
+// Backward-compat wrapper: compute layout then render
+function createFlowchartSketchXML(text: string, plan: SketchPlan, layout?: FlowchartLayoutOverrides): string {
+  const model = computeFlowchartLayout(plan, text, layout)
+  return renderFlowchartModel(model, plan)
+}
   const stages = normalizeFunnelElements(plan.elements, text).slice(0, 4)
   const count = stages.length
   const topY = count === 4 ? 38 : 36
@@ -1551,6 +1596,15 @@ app.post('/api/sketch', async (req, res) => {
     const ap = approvedPlan as Record<string, unknown>
     if (ap.intentType === 'flowchart' && Array.isArray(ap.elements) && ap.elements.length >= 3) {
       const layout = req.body.layout as FlowchartLayoutOverrides | undefined
+      const flowPlan = normalizePlan(approvedPlan, text)
+      if (flowPlan) {
+        const model = computeFlowchartLayout(flowPlan, text, layout)
+        return res.json({
+          ok: true,
+          sketch: createFallbackSketchXML(text, approvedPlan, layout),
+          model,
+        })
+      }
       return res.json({
         ok: true,
         sketch: createFallbackSketchXML(text, approvedPlan, layout),
@@ -1609,12 +1663,12 @@ app.post('/api/sketch', async (req, res) => {
 })
 
 /**
- * POST /api/sketch-layout-revise
- * Translate a flowchart layout instruction into deterministic layout parameters.
- * LLM only understands intent; code does the rendering.
+ * POST /api/sketch-flowchart-edit
+ * LLM interprets the instruction into a structured edit intent.
+ * Code applies the intent to the flowchart model and renders deterministically.
  */
-app.post('/api/sketch-layout-revise', async (req, res) => {
-  const { plan, instruction } = req.body
+app.post('/api/sketch-flowchart-edit', async (req, res) => {
+  const { plan, instruction, currentModel } = req.body
 
   if (!plan || typeof plan !== 'object') {
     return res.status(400).json({ ok: false, error: 'Missing plan parameter' })
@@ -1623,11 +1677,24 @@ app.post('/api/sketch-layout-revise', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Missing instruction parameter' })
   }
 
+  const normalizedPlan = normalizePlan(plan, instruction) || createFallbackPlan(instruction)
+  if (normalizedPlan.intentType !== 'flowchart') {
+    return res.json({ ok: false, error: 'Plan is not a flowchart' })
+  }
+
   const client = getOpenAIClient()
   if (!client) {
-    // Without LLM, use keyword-based fallback
-    return res.json({ ok: true, layout: parseLayoutInstruction(instruction) })
+    const fallback = interpretFlowchartInstruction(instruction)
+    const model = computeFlowchartLayout(normalizedPlan, plan.originalText || instruction, fallback.layout)
+    return res.json({
+      ok: true,
+      explanation: fallback.explanation,
+      sketch: renderFlowchartModel(model, normalizedPlan),
+      model,
+    })
   }
+
+  const nodeLabels = (normalizedPlan.elements || []).map((e: { name: string }) => e.name)
 
   try {
     const completion = await client.chat.completions.create({
@@ -1635,78 +1702,159 @@ app.post('/api/sketch-layout-revise', async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: `You are a flowchart layout assistant. You receive a flowchart plan and a layout instruction in Chinese.
+          content: `You are a flowchart layout editor. You receive a flowchart with labeled nodes and a Chinese voice instruction.
 
-Your ONLY job is to output a JSON object with numeric layout overrides. DO NOT output strokes, XML, or modified node names.
+Your ONLY job: output a JSON object describing the edit intent. DO NOT output XML, strokes, or modified node names.
 
-Available fields (all optional, omit if not relevant):
-- horizontalSpread: number (1.0 = default spacing, 1.4 = much wider, 0.8 = tighter)
-- nodeWidthMultiplier: number (1.0 = default, 1.3 = bigger boxes for more text room, 0.9 = smaller)
-- nodeHeight: number (default 8, increase to 10-12 for taller boxes)
-- centerY: number (default 25 on 50-unit grid, adjust for vertical centering)
+=== Available fields ===
+- explanation: string (required, Chinese, like "我理解为：调整「支付成功」节点的框宽，并重新对齐后续节点")
+- targetNode: string (optional, which node label the user is referring to. If the user mentions a specific name like "支付成功", match it to the closest node label from the list)
+- actions: string[] (one or more of: "widen" | "centerText" | "spread" | "compact" | "clearArrows" | "relayout")
+- layoutOverrides: object (optional numeric overrides)
+  - horizontalSpread: number (1.0 default, 1.4 wider, 0.8 tighter)
+  - nodeWidthMultiplier: number (1.0 default, 1.3 wider boxes)
+  - nodeHeight: number (default 8)
 
-Mapping rules:
-- "宽松/太窄/散开/间距大" → horizontalSpread: 1.3-1.5
-- "紧凑/收紧/太宽/靠拢" → horizontalSpread: 0.8-0.9
-- "文字居中" → nodeWidthMultiplier: 1.2, nodeHeight: 10 (ensure text fits and is centered)
-- "框压字/框太小" → nodeWidthMultiplier: 1.3-1.5, nodeHeight: 10-12
-- "箭头清楚" → horizontalSpread: 1.1 (slight spread for better arrow visibility)
-- "重新排版" → horizontalSpread: 1.2, nodeWidthMultiplier: 1.1, nodeHeight: 10, centerY: 25
-- Combined instructions → combine the relevant fields with reasonable values
+=== Mapping rules ===
+- "宽松/太窄/散开/间距大" → actions: ["spread"], horizontalSpread: 1.4
+- "紧凑/收紧/太宽/靠拢" → actions: ["compact"], horizontalSpread: 0.8
+- "文字居中" → actions: ["centerText"], nodeWidthMultiplier: 1.25, nodeHeight: 10
+- "框压字/框太小/格子不对" → actions: ["widen"], nodeWidthMultiplier: 1.4, nodeHeight: 10
+- If the user mentions a specific node (e.g. "支付成功那里"), set targetNode to that label
+- "箭头清楚" → actions: ["clearArrows"], horizontalSpread: 1.15
+- "重新排版" → actions: ["relayout"], horizontalSpread: 1.2, nodeWidthMultiplier: 1.1, nodeHeight: 10
+- Multiple instructions → combine actions
 
-Output ONLY the JSON object. No markdown fences. No extra text.
-
-Example: {"horizontalSpread": 1.4, "nodeHeight": 10}`,
+Output ONLY the JSON object. No markdown fences.`,
         },
         {
           role: 'user',
-          content: `Current plan: ${JSON.stringify({ nodes: (plan.elements || []).map((e: { name: string }) => e.name), count: (plan.elements || []).length })}
+          content: `Flowchart nodes: ${JSON.stringify(nodeLabels)}
 
 Instruction: ${instruction}`,
         },
       ],
       temperature: 0.1,
-      max_tokens: 300,
+      max_tokens: 400,
       // @ts-expect-error Mimo-specific
       extra_body: { thinking: { type: 'disabled' } },
     })
 
     const content = completion.choices[0]?.message?.content || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
     if (!content) {
-      return res.json({ ok: true, layout: parseLayoutInstruction(instruction) })
+      const fallback = interpretFlowchartInstruction(instruction)
+      return res.json({
+        ok: true,
+        explanation: fallback.explanation,
+        sketch: createFlowchartSketchXML(plan.originalText || instruction, normalizedPlan, fallback.layout),
+        model: computeFlowchartLayout(normalizedPlan, plan.originalText || instruction, fallback.layout),
+      })
     }
 
     const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    let intent: { explanation?: string; targetNode?: string; actions?: string[]; layoutOverrides?: FlowchartLayoutOverrides }
     try {
-      const layout = JSON.parse(cleaned)
-      return res.json({ ok: true, layout })
+      intent = JSON.parse(cleaned)
     } catch {
-      console.warn('[LayoutRevise] Invalid JSON, using fallback:', cleaned.slice(0, 200))
-      return res.json({ ok: true, layout: parseLayoutInstruction(instruction) })
+      console.warn('[FlowchartEdit] Invalid JSON, using fallback:', cleaned.slice(0, 200))
+      const fallback = interpretFlowchartInstruction(instruction)
+      return res.json({
+        ok: true,
+        explanation: fallback.explanation,
+        sketch: createFlowchartSketchXML(plan.originalText || instruction, normalizedPlan, fallback.layout),
+        model: computeFlowchartLayout(normalizedPlan, plan.originalText || instruction, fallback.layout),
+      })
     }
+
+    // Apply intent to build layout overrides
+    const overrides: FlowchartLayoutOverrides = { ...(intent.layoutOverrides || {}) }
+    const actions = intent.actions || []
+    if (actions.includes('spread') && !overrides.horizontalSpread) overrides.horizontalSpread = 1.4
+    if (actions.includes('compact') && !overrides.horizontalSpread) overrides.horizontalSpread = 0.8
+    if (actions.includes('widen') && !overrides.nodeWidthMultiplier) overrides.nodeWidthMultiplier = 1.4
+    if (actions.includes('centerText')) {
+      if (!overrides.nodeWidthMultiplier) overrides.nodeWidthMultiplier = 1.25
+      if (!overrides.nodeHeight) overrides.nodeHeight = 10
+    }
+    if (actions.includes('clearArrows') && !overrides.horizontalSpread) overrides.horizontalSpread = 1.15
+    if (actions.includes('relayout')) {
+      if (!overrides.horizontalSpread) overrides.horizontalSpread = 1.2
+      if (!overrides.nodeWidthMultiplier) overrides.nodeWidthMultiplier = 1.1
+      if (!overrides.nodeHeight) overrides.nodeHeight = 10
+    }
+
+    // Clamp reasonable ranges
+    if (overrides.horizontalSpread) overrides.horizontalSpread = Math.max(0.6, Math.min(1.8, overrides.horizontalSpread))
+    if (overrides.nodeWidthMultiplier) overrides.nodeWidthMultiplier = Math.max(0.6, Math.min(1.8, overrides.nodeWidthMultiplier))
+
+    const explanation = intent.explanation || `我理解为：按你"${instruction}"调整流程图布局`
+    const model = computeFlowchartLayout(normalizedPlan, plan.originalText || instruction, overrides)
+
+    return res.json({
+      ok: true,
+      explanation,
+      sketch: renderFlowchartModel(model, normalizedPlan),
+      model,
+      layoutOverrides: overrides,
+    })
   } catch (error) {
-    console.error('[LayoutRevise] API error:', error)
-    return res.json({ ok: true, layout: parseLayoutInstruction(instruction) })
+    console.error('[FlowchartEdit] API error:', error)
+    const fallback = interpretFlowchartInstruction(instruction)
+    return res.json({
+      ok: true,
+      explanation: fallback.explanation,
+      sketch: createFlowchartSketchXML(plan.originalText || instruction, normalizedPlan, fallback.layout),
+      model: computeFlowchartLayout(normalizedPlan, plan.originalText || instruction, fallback.layout),
+    })
   }
 })
 
-function parseLayoutInstruction(instruction: string): FlowchartLayoutOverrides {
+function interpretFlowchartInstruction(instruction: string): { explanation: string; layout: FlowchartLayoutOverrides } {
   const layout: FlowchartLayoutOverrides = {}
+  const parts: string[] = []
 
-  if (/宽松|太窄|散开|间距大|拉开/.test(instruction)) layout.horizontalSpread = 1.4
-  if (/紧凑|收紧|太宽|间距小|靠拢/.test(instruction)) layout.horizontalSpread = 0.8
-  if (/文字居中/.test(instruction)) { layout.nodeWidthMultiplier = 1.2; layout.nodeHeight = 10 }
-  if (/框压字|框太小/.test(instruction)) { layout.nodeWidthMultiplier = 1.4; layout.nodeHeight = 12 }
-  if (/箭头清楚/.test(instruction) && !layout.horizontalSpread) layout.horizontalSpread = 1.15
-  if (/重新排版/.test(instruction)) { layout.horizontalSpread = 1.2; layout.nodeWidthMultiplier = 1.15; layout.nodeHeight = 10 }
+  const targetMatch = instruction.match(/([一-龥]{2,6})(?:那里|那个|这|那|格子|节点|框|的格)/)
+  const targetNode = targetMatch ? targetMatch[1] : undefined
 
-  // Clamp reasonable ranges
+  if (/宽松|太窄|散开|间距大|拉开/.test(instruction)) {
+    layout.horizontalSpread = 1.4
+    parts.push('整体更宽松')
+  }
+  if (/紧凑|收紧|太宽|间距小|靠拢/.test(instruction)) {
+    layout.horizontalSpread = 0.8
+    parts.push('整体更紧凑')
+  }
+  if (/文字居中/.test(instruction)) {
+    layout.nodeWidthMultiplier = 1.25
+    layout.nodeHeight = 10
+    parts.push('文字居中')
+  }
+  if (/框压字|框太小|格子不对/.test(instruction)) {
+    layout.nodeWidthMultiplier = 1.4
+    layout.nodeHeight = 10
+    parts.push(targetNode ? `${targetNode}的框加宽` : '框加宽')
+  }
+  if (/箭头清楚/.test(instruction) && !layout.horizontalSpread) {
+    layout.horizontalSpread = 1.15
+    parts.push('箭头更清楚')
+  }
+  if (/重新排版/.test(instruction)) {
+    layout.horizontalSpread = 1.2
+    layout.nodeWidthMultiplier = 1.15
+    layout.nodeHeight = 10
+    parts.push('整体重新排版')
+  }
+
   if (layout.horizontalSpread && layout.horizontalSpread < 0.5) layout.horizontalSpread = 0.6
   if (layout.horizontalSpread && layout.horizontalSpread > 2.0) layout.horizontalSpread = 1.8
   if (layout.nodeWidthMultiplier && layout.nodeWidthMultiplier < 0.5) layout.nodeWidthMultiplier = 0.6
   if (layout.nodeWidthMultiplier && layout.nodeWidthMultiplier > 2.0) layout.nodeWidthMultiplier = 1.8
 
-  return layout
+  const explanation = parts.length > 0
+    ? `我理解为：${parts.join('，')}`
+    : `好的，已按你\"${instruction}\"调整了流程图`
+
+  return { explanation, layout }
 }
 
 /**

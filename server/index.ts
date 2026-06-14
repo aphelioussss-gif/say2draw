@@ -1165,6 +1165,8 @@ function createFlowchartSketchXML(text: string, plan: SketchPlan, layout?: Flowc
   const model = computeFlowchartLayout(plan, text, layout)
   return renderFlowchartModel(model, plan)
 }
+
+function createFunnelSketchXML(text: string, plan: SketchPlan): string {
   const stages = normalizeFunnelElements(plan.elements, text).slice(0, 4)
   const count = stages.length
   const topY = count === 4 ? 38 : 36

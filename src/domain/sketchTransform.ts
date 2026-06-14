@@ -8,8 +8,6 @@ const CANVAS_H = 500
 const MOVE_STEP = 60
 const SCALE_UP = 1.12
 const SCALE_DOWN = 0.9
-const SPREAD_RELAX = 1.18
-const SPREAD_TIGHTEN = 0.88
 
 // ---- Six-color palette ----
 const COLOR_PALETTE: Record<string, string> = {
@@ -31,12 +29,11 @@ const COLOR_PALETTE: Record<string, string> = {
 export type LocalAdjustment =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'scale'; factor: number }
-  | { type: 'spreadX'; factor: number }
   | { type: 'color'; hex: string }
 
 // ---- Detection (loose match anywhere in transcript) ----
 export function isLocalAdjustment(transcript: string): boolean {
-  return /往[左右上下]|放[左右上下]边|向右|向左|向上|向下|大一点|大一些|放大|小一点|小一些|缩小|改成[黑红蓝绿黄白]|换成[黑红蓝绿黄白]|颜色改|改颜色|宽松|散开|太窄|太挤|挤一点|间距|拉开|紧凑|收紧|太宽|靠拢/.test(transcript)
+  return /往[左右上下]|放[左右上下]边|向右|向左|向上|向下|大一点|大一些|放大|小一点|小一些|缩小|改成[黑红蓝绿黄白]|换成[黑红蓝绿黄白]|颜色改|改颜色/.test(transcript)
 }
 
 // ---- Parsing ----
@@ -48,10 +45,6 @@ export function parseLocalAdjustment(transcript: string): LocalAdjustment | null
     const hex = COLOR_PALETTE[key]
     if (hex) return { type: 'color', hex }
   }
-
-  // SpreadX — horizontal layout (check before scale to avoid ambiguity with "间距大一点")
-  if (/宽松|散开|太窄|太挤|挤一点|间距大|拉开/.test(transcript)) return { type: 'spreadX', factor: SPREAD_RELAX }
-  if (/紧凑|收紧|太宽|间距小|靠拢/.test(transcript)) return { type: 'spreadX', factor: SPREAD_TIGHTEN }
 
   // Scale
   if (/大一点|大一些|放大/.test(transcript)) return { type: 'scale', factor: SCALE_UP }
@@ -116,13 +109,6 @@ function scalePoint(pt: ControlPoint, cx: number, cy: number, factor: number): C
   ]
 }
 
-function spreadXPoint(pt: ControlPoint, cx: number, factor: number): ControlPoint {
-  return [
-    clamp(cx + (pt[0] - cx) * factor, 0, CANVAS_W),
-    pt[1],
-  ]
-}
-
 // ---- Apply adjustment to all strokes ----
 export function applyLocalAdjustment(
   strokes: RenderedStroke[],
@@ -147,17 +133,6 @@ export function applyLocalAdjustment(
       return { ...s, segments, labelPoint }
     }
 
-    if (adj.type === 'spreadX') {
-      const bounds = getSketchBounds(strokes)
-      if (!bounds) return s
-      const segments: BezierSegment[] = s.segments.map((seg) =>
-        seg.map((pt) => spreadXPoint(pt, bounds.cx, adj.factor)))
-      const labelPoint = s.labelPoint
-        ? spreadXPoint(s.labelPoint, bounds.cx, adj.factor)
-        : undefined
-      return { ...s, segments, labelPoint }
-    }
-
     // color
     return { ...s, color: adj.hex }
   })
@@ -173,9 +148,6 @@ export function getAdjustmentFeedback(adj: LocalAdjustment): string {
   }
   if (adj.type === 'scale') {
     return adj.factor > 1 ? '好的，已放大一点' : '好的，已缩小一点'
-  }
-  if (adj.type === 'spreadX') {
-    return adj.factor > 1 ? '好的，已把整体变宽松一点' : '好的，已把整体收紧一点'
   }
   // color — find the Chinese name for the hex
   const entry = Object.entries(COLOR_PALETTE).find(([, h]) => h === adj.hex)

@@ -1303,6 +1303,27 @@ Examples:
 - "轮廓更清楚" → reinforce the main outline with clearer, more continuous strokes
 - "主体放大一点" → scale up the main element while keeping supporting elements in proportion
 
+=== Flowchart / Diagram layout editing ===
+When the image shows a flowchart, process diagram, or whiteboard flow AND the user instruction is about layout（排版/布局）, you MUST re-layout the ENTIRE diagram:
+- Identify ALL nodes, arrows, and labels in the image
+- Output a COMPLETE new set of strokes with proper layout
+
+Layout rules for flowcharts:
+- Each node box MUST fully enclose its text label — increase box size if text overflows
+- Text labels MUST be centered inside their node boxes (horizontal and vertical center)
+- Adjacent nodes need enough horizontal spacing so boxes do not touch or overlap (minimum 3 grid units gap)
+- Arrow lines connect adjacent node centers; arrowheads must be visible and point clearly to the next node
+- The entire diagram should be centered on the grid (approximately x10..x40, y10..y40)
+
+Interpretations for common layout commands:
+- "文字居中" → for each node, ensure the label_point is at the box center; redraw nodes if text doesn't fit
+- "宽松一点" or "太窄了" or "散开" → increase horizontal spacing between nodes by 4-6 grid units; keep labels readable
+- "框压字" or "框太小" → enlarge boxes so there is at least 2 grid units of padding around every label
+- "箭头清楚" or "箭头清楚一点" → ensure arrow lines are straight, visible, and arrowheads are distinct triangles
+- "重新排版" → apply ALL layout rules above and output a fully relaid-out diagram
+
+IMPORTANT: For flowchart layout edits, you are expected to OUTPUT ALL STROKES AGAIN with the corrected layout. Do NOT rely on the previous strokes being "kept" — redraw everything with proper positioning.
+
 === Output format ===
 Output ONLY in XML format. NO markdown code fences.
 
@@ -1633,8 +1654,29 @@ Output the COMPLETE updated strokes. Keep all unrelated strokes unchanged, only 
     }
 
     if (!/<strokes>[\s\S]*?<\/strokes>/.test(content)) {
-      console.warn('[SketchEdit] Invalid XML response:', content.slice(0, 200))
-      return res.json({ ok: false, code: 'INVALID_XML', error: 'Model returned non-XML response' })
+      console.warn('[SketchEdit] Invalid XML on first attempt, retrying with strict prompt:', content.slice(0, 200))
+
+      // Retry once with a stricter prompt that demands XML-only output
+      const retryCompletion = await client.chat.completions.create({
+        model: getActiveModel(),
+        messages: [
+          { role: 'system', content: editPrompt },
+          { role: 'user', content: userContent as OpenAI.Chat.Completions.ChatCompletionMessage['content'] },
+          { role: 'assistant', content: content },
+          { role: 'user', content: 'Your last response was NOT in XML format. You MUST output ONLY valid XML with <strokes>...</strokes>. NO markdown fences, NO extra text outside the XML. Start directly with <thinking> or <strokes>.' },
+        ],
+        temperature: 0.1,
+        max_tokens: 4000,
+      })
+
+      const retryContent = retryCompletion.choices[0]?.message?.content || (retryCompletion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
+      if (!retryContent || !/<strokes>[\s\S]*?<\/strokes>/.test(retryContent)) {
+        console.warn('[SketchEdit] Retry also failed:', retryContent?.slice(0, 200))
+        return res.json({ ok: false, code: 'INVALID_XML', error: 'Model returned non-XML response after retry' })
+      }
+
+      console.log('[SketchEdit] Retry succeeded:', retryContent.slice(0, 200))
+      return res.json({ ok: true, sketch: retryContent })
     }
 
     console.log('[SketchEdit] Response', content.slice(0, 200))

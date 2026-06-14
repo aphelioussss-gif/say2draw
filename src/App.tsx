@@ -621,8 +621,8 @@ function App() {
         return
       }
       if (data.code === 'INVALID_XML') {
-        setFeedbackMessage('模型返回格式错误，请重试或换一种说法。')
-        speechFeedback.speak('模型返回格式错误，请重试或换一种说法。', {
+        setFeedbackMessage('模型没返回可画的格式，请说"重新排版流程图"再试一次。')
+        speechFeedback.speak('模型没返回可画的格式，请说重新排版流程图再试一次。', {
           onEnd: () => {
             if (!speech.isManuallyPausedRef.current) speech.resumeListening()
           },
@@ -762,8 +762,8 @@ function App() {
           return
         }
 
-        // 3. Complex adjustments that need LLM with vision (add detail / reshape / redo)
-        if (/加细节|加一点|加些|再加|轮廓更清楚|改成更像|重新画|增加|删除|改得|我还想|帮我加|长一点|长一些|加长|短一点|短一些|缩短|重来/.test(trimmed)) {
+        // 3. Complex adjustments that need LLM with vision (detail / reshape / layout)
+        if (/加细节|加一点|加些|再加|轮廓更清楚|改成更像|重新画|增加|删除|改得|我还想|帮我加|长一点|长一些|加长|短一点|短一些|缩短|重来|宽松|太窄|太挤|散开|间距|文字居中|框太小|框压字|箭头|对齐|排版|重新排版/.test(trimmed)) {
           if (llmStatus !== 'configured') {
             setFeedbackMessage('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。')
             speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。', {

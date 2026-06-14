@@ -569,6 +569,10 @@ function shouldUsePlannerThinking(text: string, mode?: string): boolean {
   return false
 }
 
+function shouldUseDeterministicFlowchartPlan(text: string): boolean {
+  return /流程图|流程|从.*到|登录.*支付|支付.*流程|下单.*支付/.test(text)
+}
+
 function isThinkingParamError(error: unknown): boolean {
   const msg = String(error)
   const status = (error as Record<string, unknown> | undefined)?.status
@@ -1450,6 +1454,14 @@ app.post('/api/sketch-plan', async (req, res) => {
   const modeHint = mode && typeof mode === 'string'
     ? `\nSuggested scene type from user interface: ${modeToSceneType[mode] || mode}. Follow this unless the user's words clearly suggest another type.`
     : ''
+
+  if (shouldUseDeterministicFlowchartPlan(text)) {
+    return res.json({
+      ok: true,
+      plan: createFallbackPlan(text),
+      warning: 'Used deterministic flowchart plan',
+    })
+  }
 
   const client = getOpenAIClient()
   if (!client) {

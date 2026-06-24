@@ -1,7 +1,8 @@
-import { useRef, useReducer, useState } from 'react'
+import { useRef, useReducer, useState, type FormEvent } from 'react'
 import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
 import { SketchLayer } from './components/SketchLayer'
+import { FlowchartLayer } from './components/FlowchartLayer'
 import { PlanCompanion } from './components/PlanCompanion'
 import { PlanConfirmOverlay } from './components/PlanConfirmOverlay'
 import { SidebarNav } from './components/SidebarNav'
@@ -14,7 +15,7 @@ import {
   drawingReducer,
   initialDrawingState,
 } from './domain/reducer'
-import { CANVAS_HEIGHT, CANVAS_WIDTH, CANVAS_ZONES, type Shape } from './domain/shapes'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, CANVAS_ZONES, type CanvasZone, type Shape } from './domain/shapes'
 import type { DrawingAction } from './domain/actions'
 import { useSpeechRecognition } from './hooks/useSpeechRecognition'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
@@ -31,6 +32,7 @@ import {
   getAdjustmentFeedback,
 } from './domain/sketchTransform'
 import type { RenderedStroke, RawStroke, BezierSegment, ControlPoint } from './sketch/types'
+import type { FlowchartModel } from './sketch/flowchartTypes'
 import {
   type AppPage,
   type DrawingMode,
@@ -154,9 +156,12 @@ function getSketchPixelBounds(strokes: ControlPoint[][]) {
   }
 }
 
-function createSketchNormalizer(strokes: ControlPoint[][]): (point: ControlPoint) => ControlPoint {
+function createSketchNormalizer(
+  strokes: ControlPoint[][],
+  options: { normalize?: boolean; zone?: CanvasZone | null } = {},
+): (point: ControlPoint) => ControlPoint {
   const bounds = getSketchPixelBounds(strokes)
-  if (!bounds) return (point) => point
+  if (!bounds || options.normalize === false) return (point) => point
 
   const targetWidth = CANVAS_WIDTH * 0.68
   const targetHeight = CANVAS_HEIGHT * 0.68
@@ -167,13 +172,65 @@ function createSketchNormalizer(strokes: ControlPoint[][]): (point: ControlPoint
   const scale = Math.max(0.55, Math.min(1.22, fitScale, readableScale))
   const centerX = bounds.minX + bounds.width / 2
   const centerY = bounds.minY + bounds.height / 2
-  const targetCenterX = CANVAS_WIDTH / 2
-  const targetCenterY = CANVAS_HEIGHT / 2
+  const zoneCenter = options.zone ? CANVAS_ZONES[options.zone] : null
+  const targetCenterX = zoneCenter?.cx ?? CANVAS_WIDTH / 2
+  const targetCenterY = zoneCenter?.cy ?? CANVAS_HEIGHT / 2
 
   return ([x, y]) => [
     targetCenterX + (x - centerX) * scale,
     targetCenterY + (y - centerY) * scale,
   ]
+}
+
+function getRenderedBounds(strokes: RenderedStroke[]) {
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+
+  strokes.forEach((stroke) => {
+    stroke.segments.forEach((segment) => {
+      segment.forEach(([x, y]) => {
+        minX = Math.min(minX, x)
+        minY = Math.min(minY, y)
+        maxX = Math.max(maxX, x)
+        maxY = Math.max(maxY, y)
+      })
+    })
+    if (stroke.labelPoint) {
+      minX = Math.min(minX, stroke.labelPoint[0])
+      minY = Math.min(minY, stroke.labelPoint[1])
+      maxX = Math.max(maxX, stroke.labelPoint[0])
+      maxY = Math.max(maxY, stroke.labelPoint[1])
+    }
+  })
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null
+  return { minX, minY, maxX, maxY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) }
+}
+
+function shiftRenderedStrokesToZone(strokes: RenderedStroke[], zone: CanvasZone | null | undefined): RenderedStroke[] {
+  if (!zone) return strokes
+  const bounds = getRenderedBounds(strokes)
+  const target = CANVAS_ZONES[zone]
+  if (!bounds || !target) return strokes
+
+  const currentCx = bounds.minX + bounds.width / 2
+  const currentCy = bounds.minY + bounds.height / 2
+  let dx = target.cx - currentCx
+  let dy = target.cy - currentCy
+
+  if (bounds.minX + dx < 0) dx = -bounds.minX
+  if (bounds.maxX + dx > CANVAS_WIDTH) dx = CANVAS_WIDTH - bounds.maxX
+  if (bounds.minY + dy < 0) dy = -bounds.minY
+  if (bounds.maxY + dy > CANVAS_HEIGHT) dy = CANVAS_HEIGHT - bounds.maxY
+
+  const shiftPoint = ([x, y]: ControlPoint): ControlPoint => [x + dx, y + dy]
+  return strokes.map((stroke) => ({
+    ...stroke,
+    segments: stroke.segments.map((segment) => segment.map(shiftPoint)),
+    labelPoint: stroke.labelPoint ? shiftPoint(stroke.labelPoint) : undefined,
+  }))
 }
 
 function gridCellToPixel(cell: string): ControlPoint | null {
@@ -188,16 +245,19 @@ function normalizeLabelPoint(raw: RawStroke, normalizePoint: (point: ControlPoin
   return point ? normalizePoint(point) : undefined
 }
 
-function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
+function fitAndRenderStrokes(
+  rawStrokes: RawStroke[],
+  options: { normalize?: boolean; zone?: CanvasZone | null } = {},
+): RenderedStroke[] {
   const pixelStrokes = rawStrokes.map((raw) =>
     raw.points.map((cell) => gridCellToPixel(cell) ?? [0, 0] as [number, number]),
   )
-  const normalizePoint = createSketchNormalizer(pixelStrokes)
+  const normalizePoint = createSketchNormalizer(pixelStrokes, options)
   const normalizedStrokes = pixelStrokes.map((stroke) =>
     stroke.map((point) => normalizePoint(point)),
   )
 
-  return rawStrokes.map((raw, i) => {
+  const rendered = rawStrokes.map((raw, i) => {
     const sampledPoints = normalizedStrokes[i] ?? []
     const tValues = raw.tValues.length === sampledPoints.length
       ? raw.tValues
@@ -219,6 +279,8 @@ function fitAndRenderStrokes(rawStrokes: RawStroke[]): RenderedStroke[] {
       labelPoint: normalizeLabelPoint(raw, normalizePoint),
     }
   }).filter((s) => s.segments.length > 0)
+
+  return shiftRenderedStrokesToZone(rendered, options.zone)
 }
 
 function App() {
@@ -240,7 +302,8 @@ function App() {
     concept: string
     rawStrokes: RawStroke[]
     approvedPlan?: PendingPlan
-    flowchartModel?: { nodes: Array<{ label: string; cx: number; cy: number; width: number; height: number }>; totalWidth: number; centerY: number }
+    flowchartModel?: FlowchartModel
+    flowchartTransform?: { dx: number; dy: number; scale: number }
     lastSnapshot?: { strokes: RenderedStroke[]; rawStrokes: RawStroke[] }
   } | null>(null)
   const [, setIsGeneratingSketch] = useState(false)
@@ -261,6 +324,8 @@ function App() {
   }
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null)
   const [pendingTranscriptReview, setPendingTranscriptReview] = useState<TranscriptReview | null>(null)
+  const [devCommand, setDevCommand] = useState('')
+  const showDevInput = import.meta.env.DEV || new URLSearchParams(window.location.search).has('dev')
 
   // ---- Current drawing mode (only meaningful on drawing pages) ----
   const activeMode: DrawingMode = isDrawingMode(activePage) ? activePage : 'story_scene'
@@ -270,6 +335,25 @@ function App() {
 
   function createTimestamp() {
     return new Date().toISOString()
+  }
+
+  function applyFlowchartAdjustment(adj: ReturnType<typeof parseLocalAdjustment>) {
+    if (!adj) return false
+    if (!sketchMode?.flowchartModel) return false
+
+    setSketchMode((prev) => {
+      if (!prev?.flowchartModel) return prev
+      const current = prev.flowchartTransform || { dx: 0, dy: 0, scale: 1 }
+      if (adj.type === 'move') {
+        return { ...prev, flowchartTransform: { ...current, dx: current.dx + adj.dx, dy: current.dy + adj.dy } }
+      }
+      if (adj.type === 'scale') {
+        return { ...prev, flowchartTransform: { ...current, scale: Math.max(0.75, Math.min(1.35, current.scale * adj.factor)) } }
+      }
+      return prev
+    })
+
+    return adj.type !== 'color'
   }
 
   // ---- Bounding box helpers (A2: overlap avoidance) ----
@@ -520,9 +604,16 @@ function App() {
       if (data.ok && data.sketch) {
         const parsed = parseSketchXML(data.sketch, GRID_RES)
         if (parsed && parsed.strokes.length > 0) {
-          const rendered = fitAndRenderStrokes(parsed.strokes)
+          const hasFlowchartModel = !!data.model
+          const rendered = hasFlowchartModel ? [] : fitAndRenderStrokes(parsed.strokes, { zone, normalize: true })
           setSketchStrokes(rendered)
-          setSketchMode({ concept: parsed.concept, rawStrokes: parsed.strokes, approvedPlan: plan, flowchartModel: data.model })
+          setSketchMode({
+            concept: parsed.concept,
+            rawStrokes: parsed.strokes,
+            approvedPlan: plan,
+            flowchartModel: data.model,
+            flowchartTransform: hasFlowchartModel ? { dx: 0, dy: 0, scale: 1 } : undefined,
+          })
 
           dispatch({
             type: 'generate_sketch',
@@ -589,12 +680,14 @@ function App() {
       if (data.ok && data.sketch) {
         const parsed = parseSketchXML(data.sketch, GRID_RES)
         if (parsed && parsed.strokes.length > 0) {
-          const rendered = fitAndRenderStrokes(parsed.strokes)
+          const hasFlowchartModel = !!data.model || !!sketchMode.flowchartModel
+          const rendered = hasFlowchartModel ? [] : fitAndRenderStrokes(parsed.strokes, { normalize: true })
           setSketchStrokes(rendered)
           setSketchMode((prev) => prev ? {
             ...prev,
             rawStrokes: parsed.strokes,
             flowchartModel: data.model || prev.flowchartModel,
+            flowchartTransform: data.model ? (prev.flowchartTransform || { dx: 0, dy: 0, scale: 1 }) : prev.flowchartTransform,
           } : null)
 
           const feedbackMsg = data.explanation || `好的，已按你"${instruction}"调整了流程图布局`
@@ -627,6 +720,7 @@ function App() {
 
     setIsGeneratingSketch(true)
     const screenshot = captureCanvas(canvasRef.current)
+    const snapshot = { strokes: [...sketchStrokes], rawStrokes: [...(sketchMode.rawStrokes || [])] }
 
     try {
       const zone = extractSpatialZone(instruction)
@@ -648,15 +742,19 @@ function App() {
       if (data.ok && data.sketch) {
         const parsed = parseSketchXML(data.sketch, GRID_RES)
         if (parsed && parsed.strokes.length > 0) {
-          const rendered = fitAndRenderStrokes(parsed.strokes)
+          const rendered = fitAndRenderStrokes(parsed.strokes, { zone, normalize: !accumulate })
           if (accumulate) {
             setSketchStrokes((prev) => [...prev, ...rendered])
           } else {
             setSketchStrokes(rendered)
           }
-          setSketchMode({ ...sketchMode, rawStrokes: parsed.strokes })
+          setSketchMode((prev) => prev ? {
+            ...prev,
+            rawStrokes: accumulate ? [...prev.rawStrokes, ...parsed.strokes] : parsed.strokes,
+            lastSnapshot: snapshot,
+          } : null)
 
-          const feedbackEdit = `好的，已按"${instruction}"调整`
+          const feedbackEdit = accumulate ? `好的，已添加新元素：${instruction}` : `好的，已按"${instruction}"调整`
           updateFeedback({ result: feedbackEdit, status: 'success' })
           speechFeedback.speak(feedbackEdit, {
             onEnd: () => {
@@ -713,6 +811,146 @@ function App() {
     } finally {
       setIsGeneratingSketch(false)
     }
+  }
+
+  // ---- Dev command input ----
+
+  function restoreSketchSnapshot() {
+    if (sketchMode?.lastSnapshot) {
+      const restored = sketchMode.lastSnapshot
+      setSketchStrokes(restored.strokes)
+      setSketchMode((prev) => prev ? { ...prev, rawStrokes: restored.rawStrokes, lastSnapshot: undefined } : null)
+      updateFeedback({ result: '已恢复到上一版', status: 'success' })
+      speechFeedback.speak('好的，已恢复到上一版', {
+        onEnd: () => {
+          if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+        },
+      })
+      return true
+    }
+
+    updateFeedback({ result: '没有可恢复的上一版', status: 'error' })
+    speechFeedback.speak('没有可恢复的上一版', {
+      onEnd: () => {
+        if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+      },
+    })
+    return true
+  }
+
+  async function handleDevCommandSubmit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
+    const transcript = devCommand.trim()
+    if (!transcript) return
+    setDevCommand('')
+    updateFeedback({ heardText: transcript, status: 'thinking' })
+
+    if (/^(清空|清除|清屏|擦掉画布|擦除画布)$/.test(transcript)) {
+      dispatch({ type: 'clear_canvas', rawText: transcript, parseSource: 'local', createdAt: createTimestamp() })
+      setSketchStrokes([])
+      setSketchMode(null)
+      setPendingPlan(null)
+      setPendingTranscriptReview(null)
+      updateFeedback({ result: '已清空画布', status: 'success' })
+      return
+    }
+
+    if (/^(撤销|后退)$/.test(transcript) && pendingPlan === null) {
+      if (sketchMode !== null) {
+        setSketchStrokes([])
+        setSketchMode(null)
+        updateFeedback({ result: '已撤销草图', status: 'success' })
+        return
+      }
+      dispatch({ type: 'undo', rawText: transcript, parseSource: 'local', createdAt: createTimestamp() })
+      updateFeedback({ result: '已撤销', status: 'success' })
+      return
+    }
+
+    if (pendingPlan !== null) {
+      if (/^(确认|开始画|可以|就这样|画吧|好|行)/.test(transcript)) {
+        executeApprovedPlan()
+        return
+      }
+      if (/^(取消|算了|重来|不要)/.test(transcript)) {
+        setPendingPlan(null)
+        setPendingTranscriptReview(null)
+        updateFeedback({ result: '好的，已取消', status: 'success', suggestion: '请重新描述你想画的内容' })
+        return
+      }
+      revisePendingPlan(transcript)
+      return
+    }
+
+    if (sketchMode !== null) {
+      if (/^(就这样|可以了|好了|算了|不画了)/.test(transcript)) {
+        setSketchMode(null)
+        updateFeedback({ result: '草图已确认', status: 'success' })
+        return
+      }
+
+      if (/^(恢复上一版|撤回刚才|还原|撤销|后退)/.test(transcript)) {
+        restoreSketchSnapshot()
+        return
+      }
+
+      const localAdj = parseLocalAdjustment(transcript)
+      if (localAdj) {
+        const snapshot = { strokes: [...sketchStrokes], rawStrokes: [...(sketchMode.rawStrokes || [])] }
+        setSketchMode((prev) => prev ? { ...prev, lastSnapshot: snapshot } : null)
+        if (!applyFlowchartAdjustment(localAdj)) {
+          setSketchStrokes((prev) => applyLocalAdjustment(prev, localAdj))
+        }
+        updateFeedback({ result: getAdjustmentFeedback(localAdj), status: 'success' })
+        return
+      }
+
+      if (/宽松|太窄|太挤|散开|间距|文字居中|框太小|框压字|格子不对|不对|箭头|对齐|排版|重新排版|那里/.test(transcript) && sketchMode.approvedPlan?.intentType === 'flowchart') {
+        handleFlowchartLayoutAdjust(transcript)
+        return
+      }
+
+      if (/加细节|加一点|加些|再加|轮廓更清楚|改成更像|重新画|增加|删除|改得|我还想|帮我加|长一点|长一些|加长|短一点|短一些|缩短|重来/.test(transcript)) {
+        const shouldAccumulate = /再加|增加|添加|帮我加|我还想加|旁边.*画|[左右上下]角.*加|[左右上下]边.*加/.test(transcript)
+        handleSketchEdit(transcript, shouldAccumulate)
+        return
+      }
+    }
+
+    const actions = await routeCommands(transcript)
+    const sketchAction = actions.find((a) => a.type === 'generate_sketch')
+    if (sketchAction) {
+      handleGenerateSketch(transcript)
+      return
+    }
+
+    const clearAction = actions.find((a) => a.type === 'clear_canvas')
+    if (clearAction) {
+      dispatch(clearAction)
+      setSketchStrokes([])
+      setSketchMode(null)
+      setPendingPlan(null)
+      setPendingTranscriptReview(null)
+      updateFeedback({ result: '已清空画布', status: 'success' })
+      return
+    }
+
+    const undoAction = actions.find((a) => a.type === 'undo')
+    if (undoAction) {
+      if (sketchMode !== null) {
+        setSketchStrokes([])
+        setSketchMode(null)
+        setPendingPlan(null)
+        setPendingTranscriptReview(null)
+        updateFeedback({ result: '已撤销草图', status: 'success' })
+        return
+      }
+      dispatch(undoAction)
+      updateFeedback({ result: '已撤销', status: 'success' })
+      return
+    }
+
+    updateFeedback({ result: '开发输入未命中可执行指令', status: 'error', suggestion: '试试：画一个从语音输入到生成草图的流程图 / 确认 / 放大一点 / 在左上角加一个太阳' })
   }
 
   // ---- Speech Recognition ----
@@ -774,6 +1012,37 @@ function App() {
 
       // Plan confirmation routing: confirm or cancel a pending plan
       updateFeedback({ heardText: transcript })
+      const normalizedTranscript = transcript.trim()
+      if (/^(清空|清除|清屏|擦掉画布|擦除画布)$/.test(normalizedTranscript)) {
+        dispatch({ type: 'clear_canvas', rawText: transcript, parseSource: 'local', createdAt: createTimestamp() })
+        setSketchStrokes([])
+        setSketchMode(null)
+        setPendingPlan(null)
+        setPendingTranscriptReview(null)
+        updateFeedback({ result: '已清空画布', status: 'success' })
+        speechFeedback.speak('已清空画布', {
+          onEnd: () => {
+            if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+          },
+        })
+        return
+      }
+
+      if (/^(撤销|后退)$/.test(normalizedTranscript) && pendingPlan === null) {
+        if (sketchMode !== null) {
+          setSketchStrokes([])
+          setSketchMode(null)
+          setPendingTranscriptReview(null)
+          updateFeedback({ result: '已撤销草图', status: 'success' })
+          speechFeedback.speak('已撤销草图', {
+            onEnd: () => {
+              if (!speech.isManuallyPausedRef.current) speech.resumeListening()
+            },
+          })
+          return
+        }
+      }
+
       if (pendingPlan !== null) {
         if (/^(确认|开始画|可以|就这样|画吧|好|行)/.test(transcript.trim())) {
           executeApprovedPlan()
@@ -841,7 +1110,11 @@ function App() {
         // 2. Local deterministic adjustments (move/scale/color) — no LLM
         const localAdj = parseLocalAdjustment(trimmed)
         if (localAdj) {
-          setSketchStrokes((prev) => applyLocalAdjustment(prev, localAdj))
+          const snapshot = { strokes: [...sketchStrokes], rawStrokes: [...(sketchMode.rawStrokes || [])] }
+          setSketchMode((prev) => prev ? { ...prev, lastSnapshot: snapshot } : null)
+          if (!applyFlowchartAdjustment(localAdj)) {
+            setSketchStrokes((prev) => applyLocalAdjustment(prev, localAdj))
+          }
           const adjFeedback = getAdjustmentFeedback(localAdj)
           updateFeedback({ result: adjFeedback, status: 'success' })
           speechFeedback.speak(adjFeedback, {
@@ -883,7 +1156,8 @@ function App() {
 
         // 3b. Other complex adjustments that need LLM with vision
         if (/加细节|加一点|加些|再加|轮廓更清楚|改成更像|重新画|增加|删除|改得|我还想|帮我加|长一点|长一些|加长|短一点|短一些|缩短|重来/.test(trimmed)) {
-          if (llmStatus !== 'configured') {
+          const shouldAccumulate = /再加|增加|添加|帮我加|我还想加|旁边.*画|[左右上下]角.*加|[左右上下]边.*加/.test(trimmed)
+          if (llmStatus !== 'configured' && !shouldAccumulate) {
             updateFeedback({ result: 'LLM Key 未配置', status: 'error', suggestion: '请先在设置页配置 LLM Key，或说"往右一点""放大"等简单调整' })
             speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。', {
               onEnd: () => {
@@ -892,7 +1166,7 @@ function App() {
             })
             return
           }
-          handleSketchEdit(transcript)
+          handleSketchEdit(transcript, shouldAccumulate)
           return
         }
 
@@ -1026,7 +1300,7 @@ function App() {
         }
 
         if (action.type === 'undo') {
-          if (sketchStrokes.length > 0) {
+          if (sketchMode !== null) {
             setSketchStrokes([])
             setSketchMode(null)
             setPendingPlan(null)
@@ -1088,13 +1362,35 @@ function App() {
                 <CanvasBoard
                   ref={canvasRef}
                   shapes={state.shapes}
-                  hasOverlayContent={sketchStrokes.length > 0 || pendingPlan !== null}
+                  hasOverlayContent={sketchStrokes.length > 0 || !!sketchMode?.flowchartModel || pendingPlan !== null}
                 />
-                <SketchLayer
-                  strokes={sketchStrokes}
-                  width={CANVAS_WIDTH}
-                  height={CANVAS_HEIGHT}
-                />
+                {sketchMode?.flowchartModel ? (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: CANVAS_WIDTH,
+                      height: CANVAS_HEIGHT,
+                      pointerEvents: 'none',
+                      transform: `translate(${sketchMode.flowchartTransform?.dx ?? 0}px, ${sketchMode.flowchartTransform?.dy ?? 0}px) scale(${sketchMode.flowchartTransform?.scale ?? 1})`,
+                      transformOrigin: 'center center',
+                      zIndex: 11,
+                    }}
+                  >
+                    <FlowchartLayer
+                      model={sketchMode.flowchartModel}
+                      width={CANVAS_WIDTH}
+                      height={CANVAS_HEIGHT}
+                    />
+                  </div>
+                ) : (
+                  <SketchLayer
+                    strokes={sketchStrokes}
+                    width={CANVAS_WIDTH}
+                    height={CANVAS_HEIGHT}
+                  />
+                )}
                 <PlanConfirmOverlay plan={pendingPlan} voiceStatus={speech.status} />
               </div>
             </section>
@@ -1105,6 +1401,21 @@ function App() {
           <PlanCompanion plan={pendingPlan} />
           <ModePresetPanel mode={activeMode} />
           <FeedbackPanel feedback={feedback} />
+          {showDevInput ? (
+            <form className="dev-command-panel" onSubmit={handleDevCommandSubmit} aria-label="Development command input">
+              <label htmlFor="dev-command-input">开发测试输入</label>
+              <div className="dev-command-row">
+                <input
+                  id="dev-command-input"
+                  value={devCommand}
+                  onChange={(event) => setDevCommand(event.target.value)}
+                  placeholder="输入模拟语音指令，如：确认 / 放大一点"
+                />
+                <button type="submit">执行</button>
+              </div>
+              <p>仅开发环境显示，用于宿舍/无声测试，不作为正式产品入口。</p>
+            </form>
+          ) : null}
           <div className="panel-heading">
             <h2>Command History</h2>
           </div>

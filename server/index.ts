@@ -1341,6 +1341,13 @@ function findBestElementByName(elements: PlanElement[], name: string): PlanEleme
   const normalize = (s: string) => s.replace(/[\s,，、.。:：]/g, '')
   const normName = normalize(name)
   found = elements.find(e => normalize(e.name) === normName)
+  if (found) return found
+  const targetChars = new Set(name)
+  found = elements.find(e => {
+    const elementChars = new Set(e.name)
+    const overlap = [...targetChars].filter(c => elementChars.has(c)).length
+    return overlap >= 2 && overlap >= Math.min(targetChars.size, elementChars.size) * 0.5
+  })
   return found || null
 }
 
@@ -1371,7 +1378,7 @@ function parseMoveElementPatch(revision: string): RevisionPatch | null {
 }
 
 function parseAddElementPatch(revision: string): RevisionPatch | null {
-  const afterMatch = revision.match(/在(.+?)后面(?:加|增加|新增)(?:一个)?(.+)/)
+  const afterMatch = revision.match(/(?:在)?(.+?)(?:后(?:面)?)(?:加|增加|新增)(?:一个)?(.+)/)
   const beforeMatch = revision.match(/在(.+?)前面(?:加|增加|新增)(?:一个)?(.+)/)
   const simpleMatch = revision.match(/(?:加|增加|新增)(?:一个)?(.+)/)
   if (afterMatch && afterMatch[1].trim() && afterMatch[2].trim()) {

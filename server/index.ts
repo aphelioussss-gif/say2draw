@@ -300,6 +300,13 @@ Decide what kind of drawing the user needs:
 === Stage 2: Build the plan ===
 Output a JSON plan matching the intent type.
 
+Roadshow guardrails:
+- Prefer structured whiteboard, teaching, process, and concept diagrams over detailed illustration.
+- The model's task is semantic planning only: identify intent, split it into 2-5 clear elements, and assign approximate positions/relations.
+- Do NOT promise artistic quality, fine character drawing, or rich scene detail.
+- If the user asks for an abstract or complex scene, translate it into simple shapes + short labels.
+- Keep normal plans to at most 5 elements, except flowcharts may use up to 6 nodes.
+
 Common fields:
 - intentType: one of the 7 types above.
 - compositionRationale: one Chinese sentence explaining why you chose this structure. Not a long reasoning chain — just the design rationale a user would find helpful (e.g. "先从认知到转化三层说明用户怎么变少", not "经过分析用户输入判断为漏斗图").
@@ -334,6 +341,7 @@ architecture:
 
 story_scene / teaching_diagram:
   Use the existing elements format. Add connections only if a spatial or logical flow exists.
+  For teaching_diagram, prefer labeled objects and arrows. For story_scene, reduce the scene to 2-5 recognizable elements.
 
 Rules:
 - Default color is black (#111827).
@@ -654,6 +662,25 @@ function inferFlowchartNodes(
   return ['开始', label, '完成']
 }
 
+function isUsableSketchXML(content: string): boolean {
+  const strokesMatch = content.match(/<strokes>[\s\S]*?<\/strokes>/)
+  if (!strokesMatch) return false
+
+  const strokeMatches = [...strokesMatch[0].matchAll(/<s\d+>[\s\S]*?<\/s\d+>/g)]
+  if (strokeMatches.length === 0 || strokeMatches.length > 80) return false
+
+  return strokeMatches.every((match) => {
+    const block = match[0]
+    const pointsRaw = block.match(/<points>([\s\S]*?)<\/points>/)?.[1]
+    const tRaw = block.match(/<t_values>([\s\S]*?)<\/t_values>/)?.[1]
+    if (!pointsRaw || !tRaw) return false
+    const points = [...pointsRaw.matchAll(/x(\d+)y(\d+)/g)].map((point) => [Number(point[1]), Number(point[2])])
+    const tValues = tRaw.split(',').map((item) => Number(item.trim())).filter((item) => Number.isFinite(item))
+    if (points.length === 0 || points.length !== tValues.length) return false
+    return points.every(([x, y]) => x >= 1 && x <= GRID_RES && y >= 1 && y <= GRID_RES)
+  })
+}
+
 function parseSketchPlan(content: string, originalText: string): SketchPlan | null {
   const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
   const candidates = extractJsonObjects(cleaned)
@@ -678,7 +705,7 @@ function inferIntentType(text: string, elements: PlanElement[]): string {
   if (/流程|步骤|从.*到|登录|支付|下单|确认/.test(text)) return 'flowchart'
   if (/漏斗|转化|增长|留存|激活|认知|阶段.*层/.test(text)) return 'funnel'
   if (/架构|微服务|系统|模块|网关|服务.*调用|数据库|消息/.test(text)) return 'architecture'
-  if (/讲解|解释|课堂|光合|循环|过程|原理/.test(text)) return 'teaching_diagram'
+  if (/讲解|解释|课堂|光合|循环|过程|原理|绕|关系|表示/.test(text)) return 'teaching_diagram'
   if (/故事|场景|情感|困境|情绪|氛围|站.*下|旁边/.test(text)) return 'story_scene'
   // Single subject if only 1 element with role=main
   const mainElements = elements.filter((e) => e.role === 'main')
@@ -769,10 +796,20 @@ function inferFallbackElements(text: string, subject: string): SketchPlan['eleme
   if (/太阳/.test(text)) {
     elements.push({
       name: '太阳',
-      position: /左/.test(text) ? '左上角' : '右上角',
+      position: /左/.test(text) ? '左上角' : '左边',
       color: /红/.test(text) ? '#ef4444' : '#eab308',
       role: 'supporting',
       details: ['圆形太阳', '短射线'],
+    })
+  }
+
+  if (/地球/.test(text)) {
+    elements.push({
+      name: '地球',
+      position: '中间',
+      color: '#3b82f6',
+      role: 'main',
+      details: ['圆形地球', '简单经纬线', '短标签'],
     })
   }
 
@@ -872,6 +909,8 @@ function buildMoonStrokes(cx: number, cy: number, color?: string): FallbackSketc
     {
       id: 'crescent moon outer arc',
       color,
+      label: '月亮',
+      labelPoint: [cx, cy - 9],
       points: [[cx - 7, cy + 4], [cx - 2, cy + 7], [cx + 5, cy + 4], [cx + 7, cy - 2], [cx + 2, cy - 7]],
     },
     {
@@ -917,12 +956,36 @@ function buildSunStrokes(cx: number, cy: number, color?: string): FallbackSketch
     {
       id: 'sun circle',
       color,
+      label: '太阳',
+      labelPoint: [cx, cy - 8],
       points: [[cx, cy + 4], [cx + 4, cy + 2], [cx + 4, cy - 2], [cx, cy - 4], [cx - 4, cy - 2], [cx - 4, cy + 2], [cx, cy + 4]],
     },
     {
       id: 'sun rays',
       color,
       points: [[cx, cy + 7], [cx, cy + 10], [cx + 5, cy + 5], [cx + 8, cy + 8], [cx + 7, cy], [cx + 11, cy], [cx + 5, cy - 5], [cx + 8, cy - 8], [cx, cy - 7], [cx, cy - 10], [cx - 5, cy - 5], [cx - 8, cy - 8], [cx - 7, cy], [cx - 11, cy], [cx - 5, cy + 5], [cx - 8, cy + 8]],
+    },
+  ]
+}
+
+function buildEarthStrokes(cx: number, cy: number, color?: string): FallbackSketchStroke[] {
+  return [
+    {
+      id: 'earth circle',
+      color,
+      label: '地球',
+      labelPoint: [cx, cy - 8],
+      points: [[cx, cy + 5], [cx + 5, cy + 3], [cx + 6, cy - 2], [cx + 2, cy - 6], [cx - 4, cy - 4], [cx - 6, cy + 1], [cx - 3, cy + 5], [cx, cy + 5]],
+    },
+    {
+      id: 'earth latitude line',
+      color,
+      points: [[cx - 5, cy], [cx - 1, cy + 1], [cx + 4, cy]],
+    },
+    {
+      id: 'earth longitude curve',
+      color,
+      points: [[cx, cy + 5], [cx - 2, cy + 1], [cx - 1, cy - 4], [cx + 1, cy - 6]],
     },
   ]
 }
@@ -959,6 +1022,8 @@ function buildGenericStrokes(cx: number, cy: number, name: string, color?: strin
     {
       id: `${name} main outline`,
       color,
+      label: name.slice(0, 6),
+      labelPoint: [cx, cy],
       points: [[cx - 7, cy + 5], [cx - 2, cy + 8], [cx + 5, cy + 5], [cx + 7, cy], [cx + 4, cy - 6], [cx - 4, cy - 6], [cx - 7, cy], [cx - 7, cy + 5]],
     },
     {
@@ -1204,6 +1269,7 @@ function buildElementStrokes(element: SketchPlan['elements'][number], index: num
   if (/月亮|月牙/.test(name)) return buildMoonStrokes(cx, cy, color)
   if (/女孩|小女孩|人物|人/.test(name)) return buildGirlStrokes(cx, cy, color)
   if (/太阳/.test(name)) return buildSunStrokes(cx, cy, color)
+  if (/地球/.test(name)) return buildEarthStrokes(cx, cy, color)
   if (/树/.test(name)) return buildTreeStrokes(cx, cy, color)
   if (/星/.test(name)) return buildStarStrokes(cx + index * 3, cy, color)
   if (/影子/.test(name)) return [{ id: 'soft ground shadow', color, points: [[cx - 6, cy], [cx - 2, cy - 1], [cx + 4, cy - 1], [cx + 7, cy]] }]
@@ -1605,23 +1671,20 @@ app.post('/api/sketch', async (req, res) => {
     })
   }
 
-  // Deterministic rendering for confirmed flowchart plans avoids LLM re-interpretation
+  // Deterministic rendering for confirmed structured plans avoids LLM re-interpretation.
+  // This is the roadshow-safe path: the model plans semantics, code controls layout.
   if (approvedPlan && typeof approvedPlan === 'object') {
-    const ap = approvedPlan as Record<string, unknown>
-    if (ap.intentType === 'flowchart' && Array.isArray(ap.elements) && ap.elements.length >= 3) {
-      const layout = req.body.layout as FlowchartLayoutOverrides | undefined
-      const flowPlan = normalizePlan(approvedPlan, text)
-      if (flowPlan) {
-        const model = computeFlowchartLayout(flowPlan, text, layout)
-        return res.json({
-          ok: true,
-          sketch: createFallbackSketchXML(text, approvedPlan, layout),
-          model,
-        })
-      }
+    const layout = req.body.layout as FlowchartLayoutOverrides | undefined
+    const flowPlan = normalizePlan(approvedPlan, text)
+    if (flowPlan && ['flowchart', 'funnel', 'architecture', 'teaching_diagram'].includes(flowPlan.intentType)) {
+      const model = flowPlan.intentType === 'flowchart'
+        ? computeFlowchartLayout(flowPlan, text, layout)
+        : undefined
       return res.json({
         ok: true,
-        sketch: createFallbackSketchXML(text, approvedPlan, layout),
+        sketch: createFallbackSketchXML(text, flowPlan, layout),
+        model,
+        warning: 'Used deterministic structured renderer',
       })
     }
   }
@@ -1637,7 +1700,7 @@ app.post('/api/sketch', async (req, res) => {
           { role: 'system', content: buildSketchSystemPrompt(sceneType) },
           { role: 'user', content: buildSketchUserPrompt(text, typeof zone === 'string' ? zone : null, approvedPlan || null) },
         ],
-        temperature: 0.3,
+        temperature: 0.2,
         max_tokens: 4000,
         // @ts-expect-error Mimo-specific
         extra_body: { thinking: { type: "disabled" } },
@@ -1655,8 +1718,8 @@ app.post('/api/sketch', async (req, res) => {
       })
     }
 
-    if (!/<strokes>[\s\S]*?<\/strokes>/.test(content)) {
-      console.warn('[Sketch] Invalid XML, using local fallback:', content.slice(0, 200))
+    if (!isUsableSketchXML(content)) {
+      console.warn('[Sketch] Invalid or unsafe XML, using local fallback:', content.slice(0, 200))
       return res.json({
         ok: true,
         sketch: createFallbackSketchXML(text, approvedPlan),
@@ -1682,7 +1745,7 @@ app.post('/api/sketch', async (req, res) => {
  * Code applies the intent to the flowchart model and renders deterministically.
  */
 app.post('/api/sketch-flowchart-edit', async (req, res) => {
-  const { plan, instruction, currentModel } = req.body
+  const { plan, instruction } = req.body
 
   if (!plan || typeof plan !== 'object') {
     return res.status(400).json({ ok: false, error: 'Missing plan parameter' })
@@ -1866,7 +1929,7 @@ function interpretFlowchartInstruction(instruction: string): { explanation: stri
 
   const explanation = parts.length > 0
     ? `我理解为：${parts.join('，')}`
-    : `好的，已按你\"${instruction}\"调整了流程图`
+    : `好的，已按你"${instruction}"调整了流程图`
 
   return { explanation, layout }
 }
@@ -1882,12 +1945,19 @@ app.post('/api/sketch-edit', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Missing instruction parameter' })
   }
 
+  const isAccumulate = accumulate === true
   const client = getOpenAIClient()
   if (!client) {
+    if (isAccumulate) {
+      return res.json({
+        ok: true,
+        sketch: createFallbackSketchXML(instruction, createFallbackPlan(instruction)),
+        warning: 'LLM not configured; used local additive fallback',
+      })
+    }
     return res.json({ ok: false, code: 'LLM_NOT_CONFIGURED', error: 'LLM not configured' })
   }
 
-  const isAccumulate = accumulate === true
   const editPrompt = isAccumulate ? SKETCH_EDIT_ADD_PROMPT : SKETCH_EDIT_SYSTEM_PROMPT
   const editUserText = isAccumulate
     ? `Current sketch concept: ${previousConcept || 'unknown'}
@@ -1917,7 +1987,7 @@ Output the COMPLETE updated strokes. Keep all unrelated strokes unchanged, only 
         { role: 'system', content: editPrompt },
         { role: 'user', content: userContent as OpenAI.Chat.Completions.ChatCompletionMessage['content'] },
       ],
-      temperature: 0.3,
+      temperature: isAccumulate ? 0.2 : 0.3,
       max_tokens: 4000,
       // @ts-expect-error Mimo-specific
       extra_body: { thinking: { type: "disabled" } },
@@ -1928,8 +1998,8 @@ Output the COMPLETE updated strokes. Keep all unrelated strokes unchanged, only 
       return res.json({ ok: false, error: 'No response from LLM' })
     }
 
-    if (!/<strokes>[\s\S]*?<\/strokes>/.test(content)) {
-      console.warn('[SketchEdit] Invalid XML on first attempt, retrying with strict prompt:', content.slice(0, 200))
+    if (!isUsableSketchXML(content)) {
+      console.warn('[SketchEdit] Invalid or unsafe XML on first attempt, retrying with strict prompt:', content.slice(0, 200))
 
       // Retry once with a stricter prompt that demands XML-only output
       const retryCompletion = await client.chat.completions.create({
@@ -1945,8 +2015,8 @@ Output the COMPLETE updated strokes. Keep all unrelated strokes unchanged, only 
       })
 
       const retryContent = retryCompletion.choices[0]?.message?.content || (retryCompletion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
-      if (!retryContent || !/<strokes>[\s\S]*?<\/strokes>/.test(retryContent)) {
-        console.warn('[SketchEdit] Retry also failed:', retryContent?.slice(0, 200))
+      if (!retryContent || !isUsableSketchXML(retryContent)) {
+        console.warn('[SketchEdit] Retry also failed validation:', retryContent?.slice(0, 200))
         return res.json({ ok: false, code: 'INVALID_XML', error: 'Model returned non-XML response after retry' })
       }
 

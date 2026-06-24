@@ -525,6 +525,57 @@
   color: var(--text-primary);
 }
 
+/* ---- Dev Command Panel ---- */
+
+.dev-command-panel {
+  margin-bottom: 20px;
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.dev-command-panel label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.dev-command-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dev-command-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.dev-command-row button {
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0 12px;
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dev-command-panel p {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
 /* ---- Mode Preset Panel ---- */
 
 .mode-preset-panel {

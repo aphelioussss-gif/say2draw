@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -55,6 +55,176 @@ function getOpenAIClient(): OpenAI | null {
   openai = new OpenAI({ apiKey, baseURL: getBaseURL() })
   return openai
 }
+
+// ============================================================
+// PR35 trace logging: runtime evidence for human eval
+// ============================================================
+
+const TRACE_ENDPOINTS = new Set([
+  '/api/sketch-plan',
+  '/api/sketch-plan/revise',
+  '/api/sketch',
+  '/api/sketch-flowchart-edit',
+  '/api/sketch-edit',
+])
+
+type JsonRecord = Record<string, unknown>
+
+function formatBeijingIso(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const value = (type: string) => parts.find((part) => part.type === type)?.value || '00'
+  return `${value('year')}-${value('month')}-${value('day')}T${value('hour')}:${value('minute')}:${value('second')}+08:00`
+}
+
+function formatBeijingDate(date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
+}
+
+function createTraceId(date = new Date()): string {
+  const day = formatBeijingDate(date).replace(/-/g, '')
+  const suffix = Math.random().toString(36).slice(2, 8)
+  return `T-${day}-${date.getTime()}-${suffix}`
+}
+
+function summarizeRequestBody(body: unknown): JsonRecord {
+  if (!body || typeof body !== 'object') return {}
+  const source = body as JsonRecord
+  const result: JsonRecord = {}
+
+  for (const key of ['text', 'mode', 'zone', 'revision', 'instruction', 'previousConcept', 'accumulate']) {
+    if (source[key] !== undefined) result[key] = source[key]
+  }
+
+  if (source.plan && typeof source.plan === 'object') {
+    const plan = source.plan as JsonRecord
+    result.planSummary = {
+      intentType: plan.intentType,
+      elementCount: Array.isArray(plan.elements) ? plan.elements.length : undefined,
+      elementNames: Array.isArray(plan.elements)
+        ? plan.elements.map((item) => typeof item === 'object' && item ? (item as JsonRecord).name : undefined).filter(Boolean)
+        : undefined,
+    }
+  }
+
+  if (source.approvedPlan && typeof source.approvedPlan === 'object') {
+    const plan = source.approvedPlan as JsonRecord
+    result.approvedPlanSummary = {
+      intentType: plan.intentType,
+      elementCount: Array.isArray(plan.elements) ? plan.elements.length : undefined,
+    }
+  }
+
+  if (typeof source.currentImage === 'string') {
+    result.currentImage = `[image omitted, length=${source.currentImage.length}]`
+  }
+
+  return result
+}
+
+function summarizeRenderResult(body: unknown): JsonRecord {
+  if (!body || typeof body !== 'object') return {}
+  const source = body as JsonRecord
+  const sketch = source.sketch
+  const model = source.model
+
+  return {
+    hasSketch: typeof sketch === 'string',
+    sketchLength: typeof sketch === 'string' ? sketch.length : undefined,
+    hasModel: !!model,
+    modelNodeCount: model && typeof model === 'object' && Array.isArray((model as JsonRecord).nodes)
+      ? ((model as JsonRecord).nodes as unknown[]).length
+      : undefined,
+    explanation: source.explanation,
+    warning: source.warning,
+    error: source.error,
+    code: source.code,
+  }
+}
+
+function inferTraceStatus(body: unknown): string {
+  if (!body || typeof body !== 'object') return 'unknown'
+  const source = body as JsonRecord
+  if (source.ok === false) return 'error'
+  if (source.warning) return 'warning'
+  return 'success'
+}
+
+function writeTraceRecord(record: JsonRecord): void {
+  try {
+    const date = formatBeijingDate()
+    const dir = resolve(__dirname, '../data/traces')
+    mkdirSync(dir, { recursive: true })
+    appendFileSync(resolve(dir, `${date}.jsonl`), `${JSON.stringify(record)}\n`, 'utf-8')
+  } catch (error) {
+    console.warn('[TraceLog] Failed to write trace:', error)
+  }
+}
+
+app.use((req, res, next) => {
+  if (!TRACE_ENDPOINTS.has(req.path)) {
+    next()
+    return
+  }
+
+  const traceId = createTraceId()
+  const startedAt = Date.now()
+  const originalJson = res.json.bind(res)
+  res.setHeader('X-Say2Draw-Trace-Id', traceId)
+
+  res.json = (body: unknown) => {
+    const responseBody = body && typeof body === 'object'
+      ? { ...(body as JsonRecord), traceId }
+      : body
+
+    writeTraceRecord({
+      traceId,
+      createdAt: formatBeijingIso(),
+      endpoint: req.path,
+      method: req.method,
+      input: typeof req.body?.text === 'string'
+        ? req.body.text
+        : typeof req.body?.instruction === 'string'
+          ? req.body.instruction
+          : typeof req.body?.revision === 'string'
+            ? req.body.revision
+            : null,
+      mode: typeof req.body?.mode === 'string' ? req.body.mode : null,
+      model: getActiveModel(),
+      promptVersion: 'pr35-auto-trace-logging',
+      status: inferTraceStatus(responseBody),
+      durationMs: Date.now() - startedAt,
+      request: summarizeRequestBody(req.body),
+      plan: responseBody && typeof responseBody === 'object' ? (responseBody as JsonRecord).plan ?? null : null,
+      revisionPatch: responseBody && typeof responseBody === 'object' ? (responseBody as JsonRecord).revisionPatch ?? null : null,
+      finalPlan: responseBody && typeof responseBody === 'object' ? (responseBody as JsonRecord).plan ?? null : null,
+      renderResult: summarizeRenderResult(responseBody),
+      debugLog: [{
+        statusCode: res.statusCode,
+        ok: responseBody && typeof responseBody === 'object' ? (responseBody as JsonRecord).ok : undefined,
+        warning: responseBody && typeof responseBody === 'object' ? (responseBody as JsonRecord).warning : undefined,
+        error: responseBody && typeof responseBody === 'object' ? (responseBody as JsonRecord).error : undefined,
+      }],
+    })
+
+    return originalJson(responseBody)
+  }
+
+  next()
+})
 
 // ============================================================
 // Sketch Agent Prompts (SketchAgent-style grid sketching language)

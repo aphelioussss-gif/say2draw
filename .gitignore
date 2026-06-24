@@ -1,6 +1,10 @@
 # Logs
 logs
 *.log
+
+# Local eval runtime data
+data/traces/
+data/eval-ratings/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

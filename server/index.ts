@@ -1,3 +1,25 @@
+import { readFileSync } from 'fs'
+import { resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
+
+// Load .env file manually (no dotenv dependency needed)
+const __dirname = dirname(fileURLToPath(import.meta.url))
+try {
+  const envPath = resolve(__dirname, '../.env')
+  const envContent = readFileSync(envPath, 'utf-8')
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eqIdx = trimmed.indexOf('=')
+    if (eqIdx === -1) continue
+    const key = trimmed.slice(0, eqIdx).trim()
+    const val = trimmed.slice(eqIdx + 1).trim()
+    if (!process.env[key]) process.env[key] = val
+  }
+} catch {
+  // .env file not found or unreadable
+}
+
 import express from 'express'
 import cors from 'cors'
 import OpenAI from 'openai'
@@ -632,7 +654,7 @@ function inferFlowchartNodes(
     const to = fromTo[2].trim()
     if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
     if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
-    if (existingNames.length >= 2) return existingNames
+    if (existingNames.length >= 3) return existingNames
     return [from, '处理中', to]
   }
 
@@ -643,7 +665,7 @@ function inferFlowchartNodes(
     const to = looseFromTo[2].trim()
     if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
     if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
-    if (existingNames.length >= 2) return existingNames
+    if (existingNames.length >= 3) return existingNames
     return [from, '处理中', to]
   }
 
@@ -1610,7 +1632,15 @@ app.post('/api/sketch-plan/revise', async (req, res) => {
 
   const client = getOpenAIClient()
   if (!client) {
-    return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: 'LLM not configured; used fallback revision' })
+    const fallbackResult = reviseFallbackPlan(basePlan, revision)
+    const changed = JSON.stringify(fallbackResult.elements) !== JSON.stringify(basePlan.elements)
+    return res.json({
+      ok: true,
+      plan: fallbackResult,
+      warning: changed
+        ? 'LLM not configured; used fallback revision'
+        : 'LLM not configured; revision text not recognized by fallback, plan unchanged',
+    })
   }
 
   try {
@@ -1640,6 +1670,18 @@ app.post('/api/sketch-plan/revise', async (req, res) => {
 
     const revisedPlan = parseSketchPlan(content, revision)
     if (revisedPlan) {
+      // Validate semantic consistency: intent type and element count should match
+      const originalCount = basePlan.elements.length
+      const revisedCount = revisedPlan.elements.length
+      const droppedElements = originalCount > revisedCount
+      if (revisedPlan.intentType !== basePlan.intentType) {
+        console.warn('[SketchPlanRevise] LLM changed intentType from', basePlan.intentType, 'to', revisedPlan.intentType, '- rejecting')
+        return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: `LLM changed intentType from ${basePlan.intentType} to ${revisedPlan.intentType}; used fallback revision` })
+      }
+      if (droppedElements && originalCount >= 3) {
+        console.warn('[SketchPlanRevise] LLM dropped elements:', originalCount, '→', revisedCount, '- rejecting')
+        return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: `LLM dropped elements from ${originalCount} to ${revisedCount}; used fallback revision` })
+      }
       return res.json({ ok: true, plan: revisedPlan })
     }
 

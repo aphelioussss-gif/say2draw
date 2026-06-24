@@ -1,4 +1,4 @@
-import { useRef, useReducer, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useReducer, useState, type FormEvent } from 'react'
 import { CanvasBoard } from './components/CanvasBoard'
 import { CommandHistory } from './components/CommandHistory'
 import { SketchLayer } from './components/SketchLayer'
@@ -31,6 +31,13 @@ import {
   applyLocalAdjustment,
   getAdjustmentFeedback,
 } from './domain/sketchTransform'
+import {
+  createDebugLogEntry,
+  setOnLogEntryCallback,
+  summarisePlan,
+  extractErrorMessage,
+} from './domain/debugLog'
+import DebugLogPanel from './components/DebugLogPanel'
 import type { RenderedStroke, RawStroke, BezierSegment, ControlPoint } from './sketch/types'
 import type { FlowchartModel } from './sketch/flowchartTypes'
 import {
@@ -323,6 +330,15 @@ function App() {
     elements: Array<{ name: string; position: string; color: string; role: string; details?: string[] }>
   }
   const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null)
+  const [, setDebugLogRefreshKey] = useState(0)
+
+  // Wire up auto-refresh for DebugLogPanel whenever a log entry is created
+  useEffect(() => {
+    setOnLogEntryCallback(() => setDebugLogRefreshKey((k) => k + 1))
+    return () => {
+      setOnLogEntryCallback(null)
+    }
+  }, [])
   const [pendingTranscriptReview, setPendingTranscriptReview] = useState<TranscriptReview | null>(null)
   const [devCommand, setDevCommand] = useState('')
   const showDevInput = import.meta.env.DEV || new URLSearchParams(window.location.search).has('dev')
@@ -498,6 +514,14 @@ function App() {
         const preview = data.plan.previewText || '已生成绘图计划'
         const message = `${preview}。可以说确认开始画，取消重来，也可以继续说你想怎么改。`
         updateFeedback({ result: message, status: 'success' })
+        createDebugLogEntry({
+          command: rawText,
+          stage: 'plan',
+          status: data.warning && !/deterministic/.test(data.warning) ? 'fallback' : 'success',
+          endpoint: '/api/sketch-plan',
+          outputSummary: summarisePlan(data.plan),
+          warning: data.warning || undefined,
+        })
         if (!speech.isManuallyPausedRef.current) {
           speech.resumeListening()
         }
@@ -515,8 +539,24 @@ function App() {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
       })
-    } catch {
+      createDebugLogEntry({
+        command: rawText,
+        stage: 'plan',
+        status: 'error',
+        endpoint: '/api/sketch-plan',
+        failureType: 'intent_recognition',
+        outputSummary: 'plan 返回无效',
+      })
+    } catch (error) {
       updateFeedback({ result: '网络错误，请重试', status: 'error' })
+      createDebugLogEntry({
+        command: rawText,
+        stage: 'plan',
+        status: 'error',
+        endpoint: '/api/sketch-plan',
+        failureType: 'llm_api',
+        error: extractErrorMessage(error),
+      })
       speechFeedback.speak('网络错误，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -552,11 +592,19 @@ function App() {
         const revisedPlan = { ...data.plan, originalText: currentPlan.originalText }
         setPendingPlan(revisedPlan)
         const message = `${data.plan.previewText || '计划已更新'}。已按你的意见调整，确认就开始画，也可以继续修改。`
-        updateFeedback({ result: message, status: 'success' })
+        updateFeedback({ result: message, status: data.warning ? 'error' : 'success' })
         speechFeedback.speak(message, {
           onEnd: () => {
             if (!speech.isManuallyPausedRef.current) speech.resumeListening()
           },
+        })
+        createDebugLogEntry({
+          command: revision,
+          stage: 'plan-revise',
+          status: data.warning ? 'fallback' : 'success',
+          endpoint: '/api/sketch-plan/revise',
+          warning: data.warning || undefined,
+          outputSummary: summarisePlan(data.plan),
         })
         return
       }
@@ -567,8 +615,24 @@ function App() {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
       })
-    } catch {
+      createDebugLogEntry({
+        command: revision,
+        stage: 'plan-revise',
+        status: 'error',
+        endpoint: '/api/sketch-plan/revise',
+        failureType: 'intent_recognition',
+        error: 'revision returned invalid plan',
+      })
+    } catch (error) {
       updateFeedback({ result: '网络错误，请重试', status: 'error' })
+      createDebugLogEntry({
+        command: revision,
+        stage: 'plan-revise',
+        status: 'error',
+        endpoint: '/api/sketch-plan/revise',
+        failureType: 'llm_api',
+        error: extractErrorMessage(error),
+      })
       speechFeedback.speak('网络错误，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
@@ -614,6 +678,17 @@ function App() {
             flowchartModel: data.model,
             flowchartTransform: hasFlowchartModel ? { dx: 0, dy: 0, scale: 1 } : undefined,
           })
+          const planElementCount = plan.elements?.length ?? 0
+          const labelCount = parsed.strokes.filter((s: RawStroke) => s.label).length
+          const elementMismatch = labelCount > 0 && labelCount < planElementCount
+          createDebugLogEntry({
+            command: plan.originalText,
+            stage: 'sketch',
+            status: data.warning && !/deterministic/.test(data.warning) ? 'fallback' : 'success',
+            endpoint: '/api/sketch',
+            outputSummary: `sketch: ${parsed.concept} (${parsed.strokes.length} 笔触, ${labelCount} 节点, plan ${planElementCount} 元素)`,
+            warning: elementMismatch ? `计划有 ${planElementCount} 个元素，但只渲染了 ${labelCount} 个节点` : (data.warning || undefined),
+          })
 
           dispatch({
             type: 'generate_sketch',
@@ -641,12 +716,28 @@ function App() {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
       })
-    } catch {
+      createDebugLogEntry({
+        command: plan.originalText,
+        stage: 'sketch',
+        status: data.warning && !/deterministic/.test(data.warning) ? 'fallback' : 'error',
+        endpoint: '/api/sketch',
+        warning: data.warning || undefined,
+        error: data.error || 'no sketch returned',
+      })
+    } catch (error) {
       updateFeedback({ result: '网络错误，请重试', status: 'error' })
       speechFeedback.speak('网络错误，请重试', {
         onEnd: () => {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
+      })
+      createDebugLogEntry({
+        command: plan.originalText,
+        stage: 'sketch',
+        status: 'error',
+        endpoint: '/api/sketch',
+        failureType: 'llm_api',
+        error: extractErrorMessage(error),
       })
     } finally {
       setIsGeneratingSketch(false)
@@ -826,6 +917,12 @@ function App() {
           if (!speech.isManuallyPausedRef.current) speech.resumeListening()
         },
       })
+      createDebugLogEntry({
+        command: '撤销',
+        stage: 'undo',
+        status: 'success',
+        outputSummary: '已恢复到上一版',
+      })
       return true
     }
 
@@ -834,6 +931,13 @@ function App() {
       onEnd: () => {
         if (!speech.isManuallyPausedRef.current) speech.resumeListening()
       },
+    })
+    createDebugLogEntry({
+      command: '撤销',
+      stage: 'undo',
+      status: 'error',
+      failureType: 'local_adjustment',
+      error: '没有可恢复的上一版',
     })
     return true
   }
@@ -902,6 +1006,12 @@ function App() {
           setSketchStrokes((prev) => applyLocalAdjustment(prev, localAdj))
         }
         updateFeedback({ result: getAdjustmentFeedback(localAdj), status: 'success' })
+        createDebugLogEntry({
+          command: transcript,
+          stage: 'local-adjustment',
+          status: 'success',
+          outputSummary: getAdjustmentFeedback(localAdj),
+        })
         return
       }
 
@@ -1420,6 +1530,7 @@ function App() {
             <h2>Command History</h2>
           </div>
           <CommandHistory records={state.history} />
+          <DebugLogPanel />
         </aside>
       </main>
     </div>

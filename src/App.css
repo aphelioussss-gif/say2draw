@@ -397,10 +397,10 @@
 .canvas-area {
   flex: 1;
   min-height: 0;
-  padding: 24px;
+  padding: 20px 24px 16px;
   overflow: auto;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   background:
     linear-gradient(rgba(31, 35, 40, 0.03) 1px, transparent 1px),
@@ -502,11 +502,43 @@
 
 /* ---- Context Panel (Right) ---- */
 
+.workbench-console {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 0.9fr);
+  gap: 16px;
+  padding: 16px 20px 18px;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.workbench-console-main,
+.workbench-console-log {
+  min-width: 0;
+}
+
+.workbench-console .feedback-panel,
+.workbench-console .dev-command-panel {
+  margin-bottom: 0;
+}
+
+.workbench-console-main {
+  display: grid;
+  gap: 12px;
+}
+
+.workbench-console-log > div {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+
 .context-panel {
-  width: 360px;
+  width: 340px;
   flex: 0 0 auto;
   min-width: 0;
-  padding: 20px;
+  padding: 18px;
   background: var(--bg-panel);
   overflow-y: auto;
 }
@@ -1284,6 +1316,10 @@
   .context-panel {
     width: 300px;
   }
+
+  .workbench-console {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 860px) {
@@ -1331,6 +1367,10 @@
 
   .drawing-workspace {
     border-right: 0;
+  }
+
+  .workbench-console {
+    padding: 14px 16px 16px;
   }
 
   .context-panel {

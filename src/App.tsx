@@ -754,6 +754,8 @@ function App() {
   async function handleFlowchartLayoutAdjust(instruction: string) {
     if (!sketchMode?.approvedPlan) return
 
+    const startedAt = performance.now()
+
     // Save snapshot for undo before applying changes
     const snapshot = { strokes: [...sketchStrokes], rawStrokes: [...(sketchMode.rawStrokes || [])] }
     setSketchMode((prev) => prev ? { ...prev, lastSnapshot: snapshot } : null)
@@ -794,6 +796,15 @@ function App() {
               if (!speech.isManuallyPausedRef.current) speech.resumeListening()
             },
           })
+          createDebugLogEntry({
+            command: instruction,
+            stage: 'flowchart-edit',
+            status: 'success',
+            endpoint: '/api/sketch-flowchart-edit',
+            inputSummary: summarisePlan(sketchMode.approvedPlan),
+            outputSummary: feedbackMsg,
+            durationMs: Math.round(performance.now() - startedAt),
+          })
           return
         }
       }
@@ -801,10 +812,30 @@ function App() {
       console.warn('[FlowchartLayout] Failed:', { ok: data.ok, hasSketch: !!data.sketch, error: data.error })
       updateFeedback({ result: '流程图调整失败，请重试', status: 'error' })
       speechFeedback.speak('流程图调整失败，请重试')
+      createDebugLogEntry({
+        command: instruction,
+        stage: 'flowchart-edit',
+        status: 'error',
+        endpoint: '/api/sketch-flowchart-edit',
+        failureType: 'invalid_format',
+        inputSummary: summarisePlan(sketchMode.approvedPlan),
+        error: data.error || 'no drawable flowchart returned',
+        durationMs: Math.round(performance.now() - startedAt),
+      })
     } catch (error) {
       console.error('[FlowchartLayout] Error:', error)
       updateFeedback({ result: '网络错误，请重试', status: 'error' })
       speechFeedback.speak('网络错误，请重试')
+      createDebugLogEntry({
+        command: instruction,
+        stage: 'flowchart-edit',
+        status: 'error',
+        endpoint: '/api/sketch-flowchart-edit',
+        failureType: 'llm_api',
+        inputSummary: summarisePlan(sketchMode.approvedPlan),
+        error: extractErrorMessage(error),
+        durationMs: Math.round(performance.now() - startedAt),
+      })
     } finally {
       setIsGeneratingSketch(false)
     }
@@ -1501,6 +1532,30 @@ function App() {
                 <PlanConfirmOverlay plan={pendingPlan} voiceStatus={speech.status} />
               </div>
             </section>
+
+            <section className="workbench-console" aria-label="Workbench console">
+              <div className="workbench-console-main">
+                <FeedbackPanel feedback={feedback} />
+                {showDevInput ? (
+                  <form className="dev-command-panel" onSubmit={handleDevCommandSubmit} aria-label="Development command input">
+                    <label htmlFor="dev-command-input">开发测试输入</label>
+                    <div className="dev-command-row">
+                      <input
+                        id="dev-command-input"
+                        value={devCommand}
+                        onChange={(event) => setDevCommand(event.target.value)}
+                        placeholder="输入模拟语音指令，如：确认 / 放大一点"
+                      />
+                      <button type="submit">执行</button>
+                    </div>
+                    <p>仅开发环境显示，用于宿舍/无声测试，不作为正式产品入口。</p>
+                  </form>
+                ) : null}
+              </div>
+              <div className="workbench-console-log">
+                <DebugLogPanel />
+              </div>
+            </section>
           </div>
         )}
 
@@ -1508,27 +1563,10 @@ function App() {
           <PlanCompanion plan={pendingPlan} />
           <VoiceGuidePanel hasPendingPlan={pendingPlan !== null} hasSketch={sketchStrokes.length > 0 || !!sketchMode?.flowchartModel} />
           <ModePresetPanel mode={activeMode} />
-          <FeedbackPanel feedback={feedback} />
-          {showDevInput ? (
-            <form className="dev-command-panel" onSubmit={handleDevCommandSubmit} aria-label="Development command input">
-              <label htmlFor="dev-command-input">开发测试输入</label>
-              <div className="dev-command-row">
-                <input
-                  id="dev-command-input"
-                  value={devCommand}
-                  onChange={(event) => setDevCommand(event.target.value)}
-                  placeholder="输入模拟语音指令，如：确认 / 放大一点"
-                />
-                <button type="submit">执行</button>
-              </div>
-              <p>仅开发环境显示，用于宿舍/无声测试，不作为正式产品入口。</p>
-            </form>
-          ) : null}
           <div className="panel-heading">
             <h2>Command History</h2>
           </div>
           <CommandHistory records={state.history} />
-          <DebugLogPanel />
         </aside>
       </main>
     </div>

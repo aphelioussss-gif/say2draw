@@ -11,6 +11,7 @@ export type DebugLogStage =
   | 'plan-revise'
   | 'sketch'
   | 'local-adjustment'
+  | 'flowchart-edit'
   | 'render'
   | 'undo'
 

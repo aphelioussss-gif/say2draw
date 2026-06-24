@@ -394,6 +394,17 @@ type SketchPlan = {
   drawingOrder: string[]
 }
 
+type RevisionPatch = {
+  operation: 'rename_element' | 'add_element' | 'remove_element' | 'move_element' | 'unknown'
+  targetName?: string
+  newName?: string
+  name?: string
+  afterName?: string
+  beforeName?: string
+  reason?: string
+  confidence?: number
+}
+
 const PLAN_COLORS = new Set(['#111827', '#ef4444', '#3b82f6', '#22c55e', '#eab308', '#f9fafb'])
 const SKETCH_REQUEST_TIMEOUT_MS = 20000
 
@@ -1322,6 +1333,217 @@ ${strokes.map((stroke, index) => strokeToXml(stroke, index + 1)).join('\n')}
 </strokes>`
 }
 
+function findBestElementByName(elements: PlanElement[], name: string): PlanElement | null {
+  let found = elements.find(e => e.name === name)
+  if (found) return found
+  found = elements.find(e => e.name.includes(name) || name.includes(e.name))
+  if (found) return found
+  const normalize = (s: string) => s.replace(/[\s,，、.。:：]/g, '')
+  const normName = normalize(name)
+  found = elements.find(e => normalize(e.name) === normName)
+  return found || null
+}
+
+function parseRenamePatch(revision: string): RevisionPatch | null {
+  const match = revision.match(/(?:把|将)?(.+?)(?:改为|改成|换成|变成)(.+)/)
+  if (!match) return null
+  const targetName = match[1].trim()
+  const newName = match[2].trim()
+  if (!targetName || !newName) return null
+  return { operation: 'rename_element', targetName, newName, confidence: 1 }
+}
+
+function parseRemoveElementPatch(revision: string): RevisionPatch | null {
+  const match = revision.match(/(?:去掉|删除|移除|不要)(.+)/)
+  if (!match) return null
+  const targetName = match[1].trim()
+  if (!targetName) return null
+  return { operation: 'remove_element', targetName, confidence: 1 }
+}
+
+function parseMoveElementPatch(revision: string): RevisionPatch | null {
+  const match = revision.match(/把(.+?)(?:放到|移到|移动到|移至)(.+?)后面/)
+  if (!match) return null
+  const targetName = match[1].trim()
+  const afterName = match[2].trim()
+  if (!targetName || !afterName) return null
+  return { operation: 'move_element', targetName, afterName, confidence: 1 }
+}
+
+function parseAddElementPatch(revision: string): RevisionPatch | null {
+  const afterMatch = revision.match(/在(.+?)后面(?:加|增加|新增)(?:一个)?(.+)/)
+  const beforeMatch = revision.match(/在(.+?)前面(?:加|增加|新增)(?:一个)?(.+)/)
+  const simpleMatch = revision.match(/(?:加|增加|新增)(?:一个)?(.+)/)
+  if (afterMatch && afterMatch[1].trim() && afterMatch[2].trim()) {
+    return { operation: 'add_element', name: afterMatch[2].trim(), afterName: afterMatch[1].trim(), confidence: 1 }
+  }
+  if (beforeMatch && beforeMatch[1].trim() && beforeMatch[2].trim()) {
+    return { operation: 'add_element', name: beforeMatch[2].trim(), beforeName: beforeMatch[1].trim(), confidence: 1 }
+  }
+  if (simpleMatch && simpleMatch[1].trim()) {
+    return { operation: 'add_element', name: simpleMatch[1].trim(), confidence: 1 }
+  }
+  return null
+}
+
+function applyRevisionPatch(plan: SketchPlan, patch: RevisionPatch): {
+  plan: SketchPlan
+  changed: boolean
+  warning?: string
+} {
+  const next: SketchPlan = {
+    ...plan,
+    elements: plan.elements.map(e => ({ ...e, details: [...e.details] })),
+    drawingOrder: [...plan.drawingOrder],
+    connections: plan.connections ? plan.connections.map(c => ({ ...c })) : undefined,
+  }
+
+  switch (patch.operation) {
+    case 'rename_element': {
+      if (!patch.targetName || !patch.newName) {
+        return { plan, changed: false, warning: 'Missing targetName or newName' }
+      }
+      const target = findBestElementByName(next.elements, patch.targetName)
+      if (!target) {
+        return { plan, changed: false, warning: `Element "${patch.targetName}" not found` }
+      }
+      target.name = patch.newName
+      next.drawingOrder = next.drawingOrder.map(n => n === patch.targetName ? patch.newName : n)
+      if (next.connections) {
+        next.connections = next.connections.map(c => ({
+          ...c,
+          from: c.from === patch.targetName ? patch.newName : c.from,
+          to: c.to === patch.targetName ? patch.newName : c.to,
+        }))
+      }
+      return { plan: next, changed: true }
+    }
+    case 'add_element': {
+      if (!patch.name) {
+        return { plan, changed: false, warning: 'Missing element name' }
+      }
+      const newElement: PlanElement = {
+        name: patch.name,
+        position: patch.afterName || patch.beforeName || '画布中央',
+        color: '#6b7280',
+        role: 'supporting',
+        details: [`新增${patch.name}节点`],
+      }
+      if (patch.afterName) {
+        const idx = next.elements.findIndex(e => e.name === patch.afterName)
+        if (idx >= 0) {
+          next.elements.splice(idx + 1, 0, newElement)
+          next.drawingOrder.splice(idx + 1, 0, patch.name)
+        } else {
+          next.elements.push(newElement)
+          next.drawingOrder.push(patch.name)
+        }
+      } else if (patch.beforeName) {
+        const idx = next.elements.findIndex(e => e.name === patch.beforeName)
+        if (idx >= 0) {
+          next.elements.splice(idx, 0, newElement)
+          next.drawingOrder.splice(idx, 0, patch.name)
+        } else {
+          next.elements.push(newElement)
+          next.drawingOrder.push(patch.name)
+        }
+      } else {
+        next.elements.push(newElement)
+        next.drawingOrder.push(patch.name)
+      }
+      if (next.intentType === 'flowchart' || next.intentType === 'funnel') {
+        next.connections = buildSequentialConnections(next.elements, next.intentType === 'funnel' ? '↓' : '→')
+      }
+      return { plan: next, changed: true }
+    }
+    case 'remove_element': {
+      if (!patch.targetName) {
+        return { plan, changed: false, warning: 'Missing targetName' }
+      }
+      const idx = next.elements.findIndex(e => e.name === patch.targetName)
+      if (idx < 0) {
+        return { plan, changed: false, warning: `Element "${patch.targetName}" not found` }
+      }
+      next.elements.splice(idx, 1)
+      next.drawingOrder = next.drawingOrder.filter(n => n !== patch.targetName)
+      if (next.intentType === 'flowchart' || next.intentType === 'funnel') {
+        next.connections = buildSequentialConnections(next.elements, next.intentType === 'funnel' ? '↓' : '→')
+      }
+      return { plan: next, changed: true }
+    }
+    case 'move_element': {
+      if (!patch.targetName || !patch.afterName) {
+        return { plan, changed: false, warning: 'Missing targetName or afterName' }
+      }
+      const fromIdx = next.elements.findIndex(e => e.name === patch.targetName)
+      const toIdx = next.elements.findIndex(e => e.name === patch.afterName)
+      if (fromIdx < 0) {
+        return { plan, changed: false, warning: `Element "${patch.targetName}" not found` }
+      }
+      if (toIdx < 0) {
+        return { plan, changed: false, warning: `Target position "${patch.afterName}" not found` }
+      }
+      const [moved] = next.elements.splice(fromIdx, 1)
+      const adjToIdx = next.elements.findIndex(e => e.name === patch.afterName)
+      next.elements.splice(adjToIdx + 1, 0, moved)
+      const orderMoved = next.drawingOrder.splice(next.drawingOrder.indexOf(patch.targetName), 1)
+      next.drawingOrder.splice(next.drawingOrder.indexOf(patch.afterName) + 1, 0, orderMoved[0])
+      if (next.intentType === 'flowchart' || next.intentType === 'funnel') {
+        next.connections = buildSequentialConnections(next.elements, next.intentType === 'funnel' ? '↓' : '→')
+      }
+      return { plan: next, changed: true }
+    }
+    default:
+      return { plan, changed: false, warning: `Unknown operation: ${patch.operation}` }
+  }
+}
+
+async function interpretRevisionPatchWithLLM(
+  client: OpenAI,
+  basePlan: SketchPlan,
+  revision: string
+): Promise<RevisionPatch | null> {
+  const completion = await client.chat.completions.create({
+    model: getActiveModel(),
+    messages: [
+      { role: 'system', content: REVISION_PATCH_PROMPT },
+      {
+        role: 'user',
+        content: `当前绘图计划：${JSON.stringify(basePlan)}\n\n用户修改意见：${revision}`,
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 500,
+    // @ts-expect-error Mimo-specific
+    extra_body: { thinking: { type: 'disabled' } },
+  })
+
+  const content = completion.choices[0]?.message?.content
+    || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
+  if (!content) return null
+
+  try {
+    const parsed = JSON.parse(content)
+    if (parsed.operation === 'rename_element' || parsed.operation === 'add_element' || parsed.operation === 'remove_element' || parsed.operation === 'move_element' || parsed.operation === 'unknown') {
+      return parsed as RevisionPatch
+    }
+    return null
+  } catch {
+    const jsonMatch = content.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0])
+        if (parsed.operation === 'rename_element' || parsed.operation === 'add_element' || parsed.operation === 'remove_element' || parsed.operation === 'move_element' || parsed.operation === 'unknown') {
+          return parsed as RevisionPatch
+        }
+      } catch {
+        // JSON parse failed on extracted object — not a valid patch
+      }
+    }
+    return null
+  }
+}
+
 function reviseFallbackPlan(plan: SketchPlan, revision: string): SketchPlan {
   const priorityDetails: string[] = []
   const next: SketchPlan = {
@@ -1424,6 +1646,45 @@ Remember:
 - Do NOT wrap output in markdown code fences
 - Respond in the same language as the concept description`
 }
+
+const REVISION_PATCH_PROMPT = `你是一个绘图计划修订解释器。
+
+你不会生成新的绘图计划。
+你只把用户的修改意见转成一个受限制的小编辑操作。
+
+当前绘图计划包含 elements（元素列表）、intentType（图类型）、connections（连线）等。
+
+允许的操作：
+- rename_element: 把已有节点改名为新名字
+- add_element: 在指定位置添加一个新节点
+- remove_element: 删除一个已有节点
+- move_element: 把一个已有节点移动到另一个节点后面
+
+规则：
+- 不要改变 intentType
+- 如果用户说 A 改为 B，理解为把已有元素中最接近 A 的元素改名为 B
+- 如果无法判断，返回 {"operation": "unknown", "reason": "..."}
+
+只返回纯 JSON，不要其他内容。
+
+用户说 "X改为Y" / "把X改成Y" / "将X换成Y" →
+{"operation": "rename_element", "targetName": "X", "newName": "Y", "confidence": 0.95}
+
+用户说 "在X后面加Y" / "加一个Y" →
+{"operation": "add_element", "name": "Y", "afterName": "X", "confidence": 0.9}
+
+用户说 "在X前面加Y" →
+{"operation": "add_element", "name": "Y", "beforeName": "X", "confidence": 0.9}
+
+用户说 "加一个Y"（没有指定位置）→
+{"operation": "add_element", "name": "Y", "confidence": 0.8}
+
+用户说 "去掉X" / "删除X" / "移除X" →
+{"operation": "remove_element", "targetName": "X", "confidence": 0.95}
+
+用户说 "把X放到Y后面" / "把X移到Y后面" →
+{"operation": "move_element", "targetName": "X", "afterName": "Y", "confidence": 0.9}
+`
 
 const SKETCH_EDIT_SYSTEM_PROMPT = `You are an expert sketch artist who edits existing hand-drawn sketches.
 
@@ -1630,67 +1891,83 @@ app.post('/api/sketch-plan/revise', async (req, res) => {
     return res.json({ ok: true, plan: createFallbackPlan(revision), warning: 'Invalid previous plan; used fallback plan' })
   }
 
+  // Step 1: Try deterministic patch parsers first
+  let patch: RevisionPatch | null = parseRenamePatch(revision) || parseRemoveElementPatch(revision) || parseMoveElementPatch(revision) || parseAddElementPatch(revision)
+
+  // Step 2: If deterministic failed and LLM available, try LLM patch interpreter
   const client = getOpenAIClient()
-  if (!client) {
-    const fallbackResult = reviseFallbackPlan(basePlan, revision)
-    const changed = JSON.stringify(fallbackResult.elements) !== JSON.stringify(basePlan.elements)
+  if (!patch && client) {
+    try {
+      patch = await interpretRevisionPatchWithLLM(client, basePlan, revision)
+    } catch (error) {
+      console.error('[SketchPlanRevise] LLM patch interpreter error:', error)
+    }
+  }
+
+  // Step 3: If we have a valid patch, apply it (deterministic code executes the change)
+  if (patch && patch.operation !== 'unknown') {
+    const result = applyRevisionPatch(basePlan, patch)
+    console.log('[SketchPlanRevise] Applied patch:', JSON.stringify(patch), 'changed:', result.changed)
     return res.json({
       ok: true,
-      plan: fallbackResult,
-      warning: changed
-        ? 'LLM not configured; used fallback revision'
-        : 'LLM not configured; revision text not recognized by fallback, plan unchanged',
+      plan: result.plan,
+      warning: result.warning,
+      revisionPatch: patch,
     })
   }
 
-  try {
-    const completion = await client.chat.completions.create({
-      model: getActiveModel(),
-      messages: [
-        { role: 'system', content: SKETCH_PLAN_PROMPT },
-        {
-          role: 'user',
-          content: `已有绘图计划：${JSON.stringify(basePlan)}
+  // Step 4: Fall back to old full-plan LLM path
+  if (client) {
+    try {
+      const completion = await client.chat.completions.create({
+        model: getActiveModel(),
+        messages: [
+          { role: 'system', content: SKETCH_PLAN_PROMPT },
+          {
+            role: 'user',
+            content: `已有绘图计划：${JSON.stringify(basePlan)}\n\n用户新的语音修改意见：${revision}\n\n请输出修订后的完整 JSON plan。保留原计划中仍然有效的部分，吸收新的修改意见。`,
+          },
+        ],
+        temperature: 0.2,
+        max_tokens: 1200,
+        // @ts-expect-error Mimo-specific
+        extra_body: { thinking: { type: 'disabled' } },
+      })
 
-用户新的语音修改意见：${revision}
-
-请输出修订后的完整 JSON plan。保留原计划中仍然有效的部分，吸收新的修改意见。`,
-        },
-      ],
-      temperature: 0.2,
-      max_tokens: 1200,
-      // @ts-expect-error Mimo-specific
-      extra_body: { thinking: { type: "disabled" } },
-    })
-
-    const content = completion.choices[0]?.message?.content || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
-    if (!content) {
-      return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: 'No response from LLM; used fallback revision' })
-    }
-
-    const revisedPlan = parseSketchPlan(content, revision)
-    if (revisedPlan) {
-      // Validate semantic consistency: intent type and element count should match
-      const originalCount = basePlan.elements.length
-      const revisedCount = revisedPlan.elements.length
-      const droppedElements = originalCount > revisedCount
-      if (revisedPlan.intentType !== basePlan.intentType) {
-        console.warn('[SketchPlanRevise] LLM changed intentType from', basePlan.intentType, 'to', revisedPlan.intentType, '- rejecting')
-        return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: `LLM changed intentType from ${basePlan.intentType} to ${revisedPlan.intentType}; used fallback revision` })
+      const content = completion.choices[0]?.message?.content || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
+      if (content) {
+        const revisedPlan = parseSketchPlan(content, revision)
+        if (revisedPlan) {
+          const originalCount = basePlan.elements.length
+          const revisedCount = revisedPlan.elements.length
+          const droppedElements = originalCount > revisedCount
+          if (revisedPlan.intentType !== basePlan.intentType) {
+            console.warn('[SketchPlanRevise] LLM changed intentType from', basePlan.intentType, 'to', revisedPlan.intentType, '- rejecting')
+            return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: `LLM changed intentType from ${basePlan.intentType} to ${revisedPlan.intentType}; used fallback revision` })
+          }
+          if (droppedElements && originalCount >= 3) {
+            console.warn('[SketchPlanRevise] LLM dropped elements:', originalCount, '->', revisedCount, '- rejecting')
+            return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: `LLM dropped elements from ${originalCount} to ${revisedCount}; used fallback revision` })
+          }
+          return res.json({ ok: true, plan: revisedPlan })
+        }
       }
-      if (droppedElements && originalCount >= 3) {
-        console.warn('[SketchPlanRevise] LLM dropped elements:', originalCount, '→', revisedCount, '- rejecting')
-        return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: `LLM dropped elements from ${originalCount} to ${revisedCount}; used fallback revision` })
-      }
-      return res.json({ ok: true, plan: revisedPlan })
+    } catch (error) {
+      console.error('[SketchPlanRevise] API error:', error)
+      return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: String(error).slice(0, 200) })
     }
-
-    console.warn('[SketchPlanRevise] Invalid JSON, using fallback:', content.slice(0, 200))
-    return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: 'Used fallback revision' })
-  } catch (error) {
-    console.error('[SketchPlanRevise] API error:', error)
-    return res.json({ ok: true, plan: reviseFallbackPlan(basePlan, revision), warning: String(error).slice(0, 200) })
   }
+
+  // Step 5: No LLM or all paths failed — use rule-based fallback
+  const fallbackResult = reviseFallbackPlan(basePlan, revision)
+  const changed = JSON.stringify(fallbackResult.elements) !== JSON.stringify(basePlan.elements)
+  return res.json({
+    ok: true,
+    plan: fallbackResult,
+    warning: changed
+      ? 'LLM not configured; used fallback revision'
+      : 'revision text not recognized, plan unchanged',
+  })
 })
 
 /**

@@ -140,6 +140,18 @@ npm run dev          # 前端（另一个终端）
 npm run build
 ```
 
+## 路演稳定性设计
+
+PR30 在 PR29 基础上增加了路演稳定性与失败可解释能力：
+
+1. **主链路稳定**：流程图生成、本地调整、撤销恢复经过验收测试，有明确的通过标准。
+2. **Debug Log 面板**：实时记录每次 API 调用、本地调整的运行状态、耗时和返回摘要。
+3. **失败分类**：失败按类型归类（llm_api / invalid_format / no_template / local_adjustment 等），便于定位和解释。
+4. **演示脚本**：预定义的 7 步演示路线，覆盖流程图生成到日志查看的完整流程。
+5. **能力边界透明**：复杂自由绘画（猫、人物等）不作为路演保底能力，演示时通过备用场景说明能力边界和后续迭代方向。
+
+详细文档见 `docs/roadshow-demo-script.md`、`docs/roadshow-acceptance.md` 和 `docs/failure-log-template.md`。
+
 ## 支持的语音指令
 
 ### 场景绘图

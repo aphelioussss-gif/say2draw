@@ -626,10 +626,15 @@ function isThinkingParamError(error: unknown): boolean {
 function normalizeFlowchartElements(elements: PlanElement[], text: string): PlanElement[] {
   const cleanedText = text.replace(/^(请)?画(一个|一张|一幅)?/, '').replace(/的?流程图?/g, '').trim()
 
-  const badPatterns = /^(请)?画|的?流程图?|^元素\d+$/
-  const validElements = elements.filter(
-    (e) => !badPatterns.test(e.name) && e.name !== text && e.name !== cleanedText,
-  )
+  const isBadFlowchartElement = (name: string) => {
+    const trimmed = name.trim()
+    return /^(请)?画/.test(trimmed)
+      || /^元素\d+$/.test(trimmed)
+      || /^(流程|流程图)$/.test(trimmed)
+      || trimmed === text
+      || trimmed === cleanedText
+  }
+  const validElements = elements.filter((e) => !isBadFlowchartElement(e.name))
 
   // Already sufficient
   if (validElements.length >= 3) return validElements
@@ -659,10 +664,10 @@ function inferFlowchartNodes(
   const isRegister = /注册/.test(text)
 
   // Pattern: "从A到B"
-  const fromTo = text.match(/从(.+?)到(.+?)(?:的?流程)?$/)
+  const fromTo = text.match(/从(.+?)到(.+?)(?:的?流程图?|流程图)?$/)
   if (fromTo) {
-    const from = fromTo[1].trim()
-    const to = fromTo[2].trim()
+    const from = cleanFlowStep(fromTo[1])
+    const to = cleanFlowStep(fromTo[2])
     if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
     if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
     if (existingNames.length >= 3) return existingNames
@@ -672,8 +677,8 @@ function inferFlowchartNodes(
   // Pattern: "A到B" (loose)
   const looseFromTo = text.match(/(.+?)到(.+)/)
   if (looseFromTo) {
-    const from = looseFromTo[1].trim()
-    const to = looseFromTo[2].trim()
+    const from = cleanFlowStep(looseFromTo[1])
+    const to = cleanFlowStep(looseFromTo[2])
     if (isPayment) return ['登录', '验证身份', '选择商品', '提交订单', '支付', '支付成功']
     if (isRegister) return ['填写信息', '邮箱验证', '设置密码', '注册完成']
     if (existingNames.length >= 3) return existingNames
@@ -1074,7 +1079,6 @@ function cleanFlowStep(value: string): string {
     .replace(/(的)?流程图$/, '')
     .replace(/[，。,.、\s]/g, '')
     .trim()
-    .slice(0, 6)
 }
 
 function inferFlowSteps(text: string, plan: SketchPlan): string[] {
@@ -1369,18 +1373,29 @@ function parseRemoveElementPatch(revision: string): RevisionPatch | null {
 }
 
 function parseMoveElementPatch(revision: string): RevisionPatch | null {
-  const match = revision.match(/把(.+?)(?:放到|移到|移动到|移至)(.+?)后面/)
-  if (!match) return null
-  const targetName = match[1].trim()
-  const afterName = match[2].trim()
-  if (!targetName || !afterName) return null
-  return { operation: 'move_element', targetName, afterName, confidence: 1 }
+  const afterMatch = revision.match(/把(.+?)(?:放到|放在|移到|移动到|移至)(.+?)(?:后面|之后)/)
+  if (afterMatch) {
+    const targetName = afterMatch[1].trim()
+    const afterName = afterMatch[2].trim()
+    if (targetName && afterName) return { operation: 'move_element', targetName, afterName, confidence: 1 }
+  }
+
+  const beforeMatch = revision.match(/把(.+?)(?:放到|放在|移到|移动到|移至)(.+?)(?:前面|之前)/)
+  if (beforeMatch) {
+    const targetName = beforeMatch[1].trim()
+    const beforeName = beforeMatch[2].trim()
+    if (targetName && beforeName) return { operation: 'move_element', targetName, beforeName, confidence: 1 }
+  }
+
+  return null
 }
 
+const ADD_VERB_PATTERN = '(?:添加|增加|新增|插入|加入|加上|加)'
+
 function parseAddElementPatch(revision: string): RevisionPatch | null {
-  const afterMatch = revision.match(/(?:在)?(.+?)(?:后(?:面)?)(?:加|增加|新增)(?:一个)?(.+)/)
-  const beforeMatch = revision.match(/在(.+?)前面(?:加|增加|新增)(?:一个)?(.+)/)
-  const simpleMatch = revision.match(/(?:加|增加|新增)(?:一个)?(.+)/)
+  const afterMatch = revision.match(new RegExp(`(?:在)?(.+?)(?:后(?:面)?|之后)${ADD_VERB_PATTERN}(?:一个)?(.+)`))
+  const beforeMatch = revision.match(new RegExp(`在(.+?)(?:前(?:面)?|之前)${ADD_VERB_PATTERN}(?:一个)?(.+)`))
+  const simpleMatch = revision.match(new RegExp(`${ADD_VERB_PATTERN}(?:一个)?(.+)`))
   if (afterMatch && afterMatch[1].trim() && afterMatch[2].trim()) {
     return { operation: 'add_element', name: afterMatch[2].trim(), afterName: afterMatch[1].trim(), confidence: 1 }
   }
@@ -1391,6 +1406,25 @@ function parseAddElementPatch(revision: string): RevisionPatch | null {
     return { operation: 'add_element', name: simpleMatch[1].trim(), confidence: 1 }
   }
   return null
+}
+
+function refreshPlanSummary(plan: SketchPlan): void {
+  if (plan.intentType === 'flowchart') {
+    const names = plan.elements.map((element) => element.name).filter(Boolean)
+    plan.previewText = `流程图：${names.join(' → ')}`.slice(0, 80)
+    plan.compositionRationale = `按 ${names.join(' → ')} 的顺序绘制流程。`
+    plan.drawingOrder = names
+    plan.connections = buildSequentialConnections(plan.elements, '→')
+    return
+  }
+
+  if (plan.intentType === 'funnel') {
+    const names = plan.elements.map((element) => element.name).filter(Boolean)
+    plan.previewText = `漏斗图：${names.join(' → ')}`.slice(0, 80)
+    plan.compositionRationale = `按 ${names.join(' → ')} 展示层级。`
+    plan.drawingOrder = names
+    plan.connections = buildSequentialConnections(plan.elements, '↓')
+  }
 }
 
 function applyRevisionPatch(plan: SketchPlan, patch: RevisionPatch): {
@@ -1423,6 +1457,7 @@ function applyRevisionPatch(plan: SketchPlan, patch: RevisionPatch): {
           to: c.to === patch.targetName ? patch.newName : c.to,
         }))
       }
+      refreshPlanSummary(next)
       return { plan: next, changed: true }
     }
     case 'add_element': {
@@ -1460,9 +1495,7 @@ function applyRevisionPatch(plan: SketchPlan, patch: RevisionPatch): {
         next.elements.push(newElement)
         next.drawingOrder.push(patch.name)
       }
-      if (next.intentType === 'flowchart' || next.intentType === 'funnel') {
-        next.connections = buildSequentialConnections(next.elements, next.intentType === 'funnel' ? '↓' : '→')
-      }
+      refreshPlanSummary(next)
       return { plan: next, changed: true }
     }
     case 'remove_element': {
@@ -1476,32 +1509,36 @@ function applyRevisionPatch(plan: SketchPlan, patch: RevisionPatch): {
       const idx = next.elements.indexOf(target)
       next.elements.splice(idx, 1)
       next.drawingOrder = next.drawingOrder.filter(n => n !== target.name)
-      if (next.intentType === 'flowchart' || next.intentType === 'funnel') {
-        next.connections = buildSequentialConnections(next.elements, next.intentType === 'funnel' ? '↓' : '→')
-      }
+      refreshPlanSummary(next)
       return { plan: next, changed: true }
     }
     case 'move_element': {
-      if (!patch.targetName || !patch.afterName) {
-        return { plan, changed: false, warning: 'Missing targetName or afterName' }
+      if (!patch.targetName || (!patch.afterName && !patch.beforeName)) {
+        return { plan, changed: false, warning: 'Missing targetName or target position' }
       }
       const movedElement = findBestElementByName(next.elements, patch.targetName)
-      const afterElement = findBestElementByName(next.elements, patch.afterName)
+      const anchorName = patch.afterName || patch.beforeName || ''
+      const anchorElement = findBestElementByName(next.elements, anchorName)
       if (!movedElement) {
         return { plan, changed: false, warning: `Element "${patch.targetName}" not found` }
       }
-      if (!afterElement) {
-        return { plan, changed: false, warning: `Target position "${patch.afterName}" not found` }
+      if (!anchorElement) {
+        return { plan, changed: false, warning: `Target position "${anchorName}" not found` }
       }
+      if (movedElement === anchorElement) {
+        return { plan: next, changed: false, warning: 'Move target equals anchor element' }
+      }
+
       const fromIdx = next.elements.indexOf(movedElement)
       const [moved] = next.elements.splice(fromIdx, 1)
-      const adjToIdx = next.elements.indexOf(afterElement)
-      next.elements.splice(adjToIdx + 1, 0, moved)
-      next.drawingOrder.splice(next.drawingOrder.indexOf(movedElement.name), 1)
-      next.drawingOrder.splice(next.drawingOrder.indexOf(afterElement.name) + 1, 0, movedElement.name)
-      if (next.intentType === 'flowchart' || next.intentType === 'funnel') {
-        next.connections = buildSequentialConnections(next.elements, next.intentType === 'funnel' ? '↓' : '→')
-      }
+      const anchorIdx = next.elements.indexOf(anchorElement)
+      next.elements.splice(patch.beforeName ? anchorIdx : anchorIdx + 1, 0, moved)
+
+      const orderFromIdx = next.drawingOrder.indexOf(movedElement.name)
+      if (orderFromIdx >= 0) next.drawingOrder.splice(orderFromIdx, 1)
+      const orderAnchorIdx = next.drawingOrder.indexOf(anchorElement.name)
+      next.drawingOrder.splice(patch.beforeName ? orderAnchorIdx : orderAnchorIdx + 1, 0, movedElement.name)
+      refreshPlanSummary(next)
       return { plan: next, changed: true }
     }
     default:
@@ -1898,7 +1935,10 @@ app.post('/api/sketch-plan/revise', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Missing revision parameter' })
   }
 
-  const basePlan = normalizePlan(plan, revision)
+  const baseOriginalText = typeof plan.originalText === 'string' && plan.originalText.trim()
+    ? plan.originalText
+    : revision
+  const basePlan = normalizePlan(plan, baseOriginalText)
   console.log('[SketchPlanRevise] basePlan:', { intentType: basePlan?.intentType, elementCount: basePlan?.elements?.length, names: basePlan?.elements?.map(e => e.name) })
   if (!basePlan) {
     return res.json({ ok: true, plan: createFallbackPlan(revision), warning: 'Invalid previous plan; used fallback plan' })
@@ -1950,7 +1990,7 @@ app.post('/api/sketch-plan/revise', async (req, res) => {
 
       const content = completion.choices[0]?.message?.content || (completion.choices[0]?.message as Record<string, unknown> | undefined)?.reasoning_content as string | undefined
       if (content) {
-        const revisedPlan = parseSketchPlan(content, revision)
+        const revisedPlan = parseSketchPlan(content, baseOriginalText)
         if (revisedPlan) {
           const originalCount = basePlan.elements.length
           const revisedCount = revisedPlan.elements.length

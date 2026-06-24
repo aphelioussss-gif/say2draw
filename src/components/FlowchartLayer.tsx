@@ -14,14 +14,25 @@ type PixelNode = {
   height: number
 }
 
-const NODE_HEIGHT = 62
+const NODE_HEIGHT = 72
 const NODE_GAP = 30
 const MARGIN_X = 48
 const STROKE = '#1f2937'
 const HAND_FONT = "'Kaiti SC', STKaiti, 'Xingkai SC', 'Songti SC', cursive"
+const LABEL_CHUNK_SIZE = 5
+
+function splitLabel(label: string): string[] {
+  if (label.length <= LABEL_CHUNK_SIZE) return [label]
+  const lines: string[] = []
+  for (let index = 0; index < label.length; index += LABEL_CHUNK_SIZE) {
+    lines.push(label.slice(index, index + LABEL_CHUNK_SIZE))
+  }
+  return lines
+}
 
 function estimateNodeWidth(label: string): number {
-  return Math.max(92, Math.min(128, label.length * 18 + 38))
+  const maxLineLength = Math.max(...splitLabel(label).map((line) => line.length), 1)
+  return Math.max(104, Math.min(184, maxLineLength * 20 + 46))
 }
 
 function layoutNodes(model: FlowchartModel, canvasWidth: number, canvasHeight: number): PixelNode[] {
@@ -78,11 +89,6 @@ function escapeSvgText(value: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-}
-
-function splitLabel(label: string): string[] {
-  if (label.length <= 4) return [label]
-  return [label.slice(0, 3), label.slice(3)]
 }
 
 function fmt(value: number): string {

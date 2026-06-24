@@ -1,0 +1,11 @@
+{
+  "evalId": "E-20260624-001",
+  "traceId": "T-20260624-001",
+  "createdAt": "2026-06-24T10:35:00+08:00",
+  "input": "画一个用户登录到订单支付的流程图",
+  "score": 2,
+  "note": "节点基本对，但支付成功缺失，箭头方向不够清楚。",
+  "failureType": "missing_required_step",
+  "decision": "failure_review",
+  "improvementTarget": "planner"
+}

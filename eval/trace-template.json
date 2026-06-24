@@ -1,0 +1,14 @@
+{
+  "traceId": "T-20260624-001",
+  "createdAt": "2026-06-24T10:30:00+08:00",
+  "input": "画一个用户登录到订单支付的流程图",
+  "mode": "whiteboard_flow",
+  "model": "mimo-v2.5",
+  "promptVersion": "pr34-baseline",
+  "status": "success",
+  "plan": {},
+  "revisionPatch": null,
+  "finalPlan": {},
+  "renderResult": {},
+  "debugLog": []
+}

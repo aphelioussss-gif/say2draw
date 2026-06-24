@@ -1437,8 +1437,9 @@ function applyRevisionPatch(plan: SketchPlan, patch: RevisionPatch): {
         details: [`新增${patch.name}节点`],
       }
       if (patch.afterName) {
-        const idx = next.elements.findIndex(e => e.name === patch.afterName)
-        if (idx >= 0) {
+        const ref = findBestElementByName(next.elements, patch.afterName)
+        if (ref) {
+          const idx = next.elements.indexOf(ref)
           next.elements.splice(idx + 1, 0, newElement)
           next.drawingOrder.splice(idx + 1, 0, patch.name)
         } else {
@@ -1446,8 +1447,9 @@ function applyRevisionPatch(plan: SketchPlan, patch: RevisionPatch): {
           next.drawingOrder.push(patch.name)
         }
       } else if (patch.beforeName) {
-        const idx = next.elements.findIndex(e => e.name === patch.beforeName)
-        if (idx >= 0) {
+        const ref = findBestElementByName(next.elements, patch.beforeName)
+        if (ref) {
+          const idx = next.elements.indexOf(ref)
           next.elements.splice(idx, 0, newElement)
           next.drawingOrder.splice(idx, 0, patch.name)
         } else {
@@ -1467,12 +1469,13 @@ function applyRevisionPatch(plan: SketchPlan, patch: RevisionPatch): {
       if (!patch.targetName) {
         return { plan, changed: false, warning: 'Missing targetName' }
       }
-      const idx = next.elements.findIndex(e => e.name === patch.targetName)
-      if (idx < 0) {
+      const target = findBestElementByName(next.elements, patch.targetName)
+      if (!target) {
         return { plan, changed: false, warning: `Element "${patch.targetName}" not found` }
       }
+      const idx = next.elements.indexOf(target)
       next.elements.splice(idx, 1)
-      next.drawingOrder = next.drawingOrder.filter(n => n !== patch.targetName)
+      next.drawingOrder = next.drawingOrder.filter(n => n !== target.name)
       if (next.intentType === 'flowchart' || next.intentType === 'funnel') {
         next.connections = buildSequentialConnections(next.elements, next.intentType === 'funnel' ? '↓' : '→')
       }
@@ -1482,19 +1485,20 @@ function applyRevisionPatch(plan: SketchPlan, patch: RevisionPatch): {
       if (!patch.targetName || !patch.afterName) {
         return { plan, changed: false, warning: 'Missing targetName or afterName' }
       }
-      const fromIdx = next.elements.findIndex(e => e.name === patch.targetName)
-      const toIdx = next.elements.findIndex(e => e.name === patch.afterName)
-      if (fromIdx < 0) {
+      const movedElement = findBestElementByName(next.elements, patch.targetName)
+      const afterElement = findBestElementByName(next.elements, patch.afterName)
+      if (!movedElement) {
         return { plan, changed: false, warning: `Element "${patch.targetName}" not found` }
       }
-      if (toIdx < 0) {
+      if (!afterElement) {
         return { plan, changed: false, warning: `Target position "${patch.afterName}" not found` }
       }
+      const fromIdx = next.elements.indexOf(movedElement)
       const [moved] = next.elements.splice(fromIdx, 1)
-      const adjToIdx = next.elements.findIndex(e => e.name === patch.afterName)
+      const adjToIdx = next.elements.indexOf(afterElement)
       next.elements.splice(adjToIdx + 1, 0, moved)
-      const orderMoved = next.drawingOrder.splice(next.drawingOrder.indexOf(patch.targetName), 1)
-      next.drawingOrder.splice(next.drawingOrder.indexOf(patch.afterName) + 1, 0, orderMoved[0])
+      next.drawingOrder.splice(next.drawingOrder.indexOf(movedElement.name), 1)
+      next.drawingOrder.splice(next.drawingOrder.indexOf(afterElement.name) + 1, 0, movedElement.name)
       if (next.intentType === 'flowchart' || next.intentType === 'funnel') {
         next.connections = buildSequentialConnections(next.elements, next.intentType === 'funnel' ? '↓' : '→')
       }
@@ -1885,6 +1889,7 @@ app.post('/api/sketch-plan', async (req, res) => {
  */
 app.post('/api/sketch-plan/revise', async (req, res) => {
   const { plan, revision } = req.body
+  console.log('[SketchPlanRevise] REQUEST:', { revision, planIntentType: plan?.intentType, planElements: plan?.elements?.length })
 
   if (!plan || typeof plan !== 'object') {
     return res.status(400).json({ ok: false, error: 'Missing plan parameter' })
@@ -1894,12 +1899,14 @@ app.post('/api/sketch-plan/revise', async (req, res) => {
   }
 
   const basePlan = normalizePlan(plan, revision)
+  console.log('[SketchPlanRevise] basePlan:', { intentType: basePlan?.intentType, elementCount: basePlan?.elements?.length, names: basePlan?.elements?.map(e => e.name) })
   if (!basePlan) {
     return res.json({ ok: true, plan: createFallbackPlan(revision), warning: 'Invalid previous plan; used fallback plan' })
   }
 
   // Step 1: Try deterministic patch parsers first
   let patch: RevisionPatch | null = parseRenamePatch(revision) || parseRemoveElementPatch(revision) || parseMoveElementPatch(revision) || parseAddElementPatch(revision)
+  console.log('[SketchPlanRevise] After deterministic parse:', { found: !!patch, operation: patch?.operation })
 
   // Step 2: If deterministic failed and LLM available, try LLM patch interpreter
   const client = getOpenAIClient()
@@ -1914,7 +1921,7 @@ app.post('/api/sketch-plan/revise', async (req, res) => {
   // Step 3: If we have a valid patch, apply it (deterministic code executes the change)
   if (patch && patch.operation !== 'unknown') {
     const result = applyRevisionPatch(basePlan, patch)
-    console.log('[SketchPlanRevise] Applied patch:', JSON.stringify(patch), 'changed:', result.changed)
+    console.log('[SketchPlanRevise] Applied patch:', JSON.stringify(patch), 'changed:', result.changed, 'resultIntentType:', result.plan.intentType, 'resultElements:', result.plan.elements.length)
     return res.json({
       ok: true,
       plan: result.plan,
@@ -1966,6 +1973,7 @@ app.post('/api/sketch-plan/revise', async (req, res) => {
   }
 
   // Step 5: No LLM or all paths failed — use rule-based fallback
+  console.log('[SketchPlanRevise] Step 5: all paths failed, using fallback, patch:', !!patch, 'client:', !!client)
   const fallbackResult = reviseFallbackPlan(basePlan, revision)
   const changed = JSON.stringify(fallbackResult.elements) !== JSON.stringify(basePlan.elements)
   return res.json({

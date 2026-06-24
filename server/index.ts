@@ -1141,8 +1141,8 @@ function nodeBoxStroke(label: string, cx: number, cy: number, width = 10, height
 }
 
 function arrowStrokes(fromX: number, toX: number, y: number): FallbackSketchStroke[] {
-  const start = fromX + 5.8
-  const end = toX - 5.8
+  const start = fromX
+  const end = Math.max(fromX + 1.5, toX)
   return [
     {
       id: 'flow arrow connector',
@@ -1206,12 +1206,12 @@ function computeFlowchartLayout(plan: SketchPlan, text: string, overrides?: Flow
   const steps = inferFlowSteps(text, plan).slice(0, 6)
   const count = steps.length
   const MIN_GAP = 3
+  const MAX_ROW_WIDTH = 46
   const nodeHeight = overrides?.nodeHeight ?? 8
   const centerY = overrides?.centerY ?? 25
   const spreadFactor = overrides?.horizontalSpread ?? 1.0
   const widthMultiplier = overrides?.nodeWidthMultiplier ?? 1.0
 
-  // Per-node width based on label length (Chinese chars ~2 grid units each + padding)
   const nodes: FlowchartNode[] = steps.map((label) => {
     const charCount = label.length
     const baseWidth = Math.max(7, charCount * 2.0 + 3)
@@ -1224,18 +1224,48 @@ function computeFlowchartLayout(plan: SketchPlan, text: string, overrides?: Flow
     }
   })
 
-  // Total layout width
-  const totalWidth = nodes.reduce((sum, n) => sum + n.width, 0) + (count - 1) * MIN_GAP * spreadFactor
+  const preferredGap = MIN_GAP * spreadFactor
+  const singleRowWidth = nodes.reduce((sum, n) => sum + n.width, 0) + (count - 1) * preferredGap
+  const rows = singleRowWidth <= MAX_ROW_WIDTH || count <= 3
+    ? [nodes]
+    : [nodes.slice(0, Math.ceil(count / 2)), nodes.slice(Math.ceil(count / 2))]
 
-  // Center the layout on the grid
-  let cx = Math.max(2, Math.round((GRID_RES - totalWidth) / 2))
-  const positioned: FlowchartNode[] = nodes.map((n) => {
-    const node: FlowchartNode = { ...n, cx: cx + n.width / 2 }
-    cx += n.width + MIN_GAP * spreadFactor
-    return node
+  const positioned: FlowchartNode[] = []
+  const rowY = rows.length === 1
+    ? [centerY]
+    : [centerY + 7, centerY - 7]
+
+  let totalWidth = 0
+  rows.forEach((row, rowIndex) => {
+    const rowNodeWidth = row.reduce((sum, n) => sum + n.width, 0)
+    const availableGap = row.length > 1 ? Math.max(2, (MAX_ROW_WIDTH - rowNodeWidth) / (row.length - 1)) : 0
+    const gap = row.length > 1 ? Math.min(preferredGap, availableGap) : 0
+    const rowWidth = rowNodeWidth + (row.length - 1) * gap
+    totalWidth = Math.max(totalWidth, rowWidth)
+
+    let cx = (GRID_RES - rowWidth) / 2
+    row.forEach((n) => {
+      const node: FlowchartNode = { ...n, cx: cx + n.width / 2, cy: rowY[rowIndex] }
+      positioned.push(node)
+      cx += n.width + gap
+    })
   })
 
   return { nodes: positioned, totalWidth, centerY }
+}
+
+function flowArrowStrokes(from: FlowchartNode, to: FlowchartNode): FallbackSketchStroke[] {
+  const sameRow = Math.abs(from.cy - to.cy) < 1
+  if (sameRow) {
+    const start = from.cx + from.width / 2 + 1
+    const end = to.cx - to.width / 2 - 1
+    return arrowStrokes(start, end, from.cy)
+  }
+
+  const x = from.cx
+  const fromY = from.cy - from.height / 2 - 1
+  const toY = to.cy + to.height / 2 + 1
+  return downArrowStrokes(x, fromY, toY)
 }
 
 function renderFlowchartModel(model: FlowchartModel, plan: SketchPlan): string {
@@ -1245,9 +1275,7 @@ function renderFlowchartModel(model: FlowchartModel, plan: SketchPlan): string {
     strokes.push(nodeBoxStroke(node.label, node.cx, node.cy, node.width, node.height))
     if (i < model.nodes.length - 1) {
       const next = model.nodes[i + 1]
-      const fromX = node.cx + node.width / 2
-      const toX = next.cx - next.width / 2
-      strokes.push(...arrowStrokes(fromX, toX, node.cy))
+      strokes.push(...flowArrowStrokes(node, next))
     }
   })
 
@@ -2133,6 +2161,43 @@ app.post('/api/sketch-flowchart-edit', async (req, res) => {
     return res.json({ ok: false, error: 'Plan is not a flowchart' })
   }
 
+  const structuralPatch = parseRenamePatch(instruction)
+    || parseRemoveElementPatch(instruction)
+    || parseMoveElementPatch(instruction)
+    || parseAddElementPatch(instruction)
+
+  if (structuralPatch && structuralPatch.operation !== 'unknown') {
+    const result = applyRevisionPatch(normalizedPlan, structuralPatch)
+    const effectivePlan = result.plan
+    const model = computeFlowchartLayout(effectivePlan, plan.originalText || instruction)
+    const explanation = result.changed
+      ? `我理解为：已更新流程图结构，${effectivePlan.elements.map((element) => element.name).join(' → ')}`
+      : `我理解为结构调整，但没有找到对应节点：${result.warning || instruction}`
+
+    return res.json({
+      ok: true,
+      explanation,
+      sketch: renderFlowchartModel(model, effectivePlan),
+      model,
+      plan: effectivePlan,
+      revisionPatch: structuralPatch,
+      warning: result.warning,
+    })
+  }
+
+  const deterministicLayout = interpretFlowchartInstruction(instruction)
+  if (Object.keys(deterministicLayout.layout).length > 0) {
+    const model = computeFlowchartLayout(normalizedPlan, plan.originalText || instruction, deterministicLayout.layout)
+    return res.json({
+      ok: true,
+      explanation: deterministicLayout.explanation,
+      sketch: renderFlowchartModel(model, normalizedPlan),
+      model,
+      plan: normalizedPlan,
+      layoutOverrides: deterministicLayout.layout,
+    })
+  }
+
   const client = getOpenAIClient()
   if (!client) {
     const fallback = interpretFlowchartInstruction(instruction)
@@ -2142,6 +2207,7 @@ app.post('/api/sketch-flowchart-edit', async (req, res) => {
       explanation: fallback.explanation,
       sketch: renderFlowchartModel(model, normalizedPlan),
       model,
+      plan: normalizedPlan,
     })
   }
 
@@ -2246,6 +2312,7 @@ Instruction: ${instruction}`,
       explanation,
       sketch: renderFlowchartModel(model, normalizedPlan),
       model,
+      plan: normalizedPlan,
       layoutOverrides: overrides,
     })
   } catch (error) {

@@ -15,8 +15,6 @@ type PixelNode = {
 }
 
 const NODE_HEIGHT = 72
-const NODE_GAP = 30
-const MARGIN_X = 48
 const STROKE = '#1f2937'
 const HAND_FONT = "'Kaiti SC', STKaiti, 'Xingkai SC', 'Songti SC', cursive"
 const LABEL_CHUNK_SIZE = 5
@@ -35,51 +33,33 @@ function estimateNodeWidth(label: string): number {
   return Math.max(104, Math.min(184, maxLineLength * 20 + 46))
 }
 
+function gridXToPixel(gridX: number, canvasWidth: number): number {
+  return ((gridX - 0.5) / 50) * canvasWidth
+}
+
+function gridYToPixel(gridY: number, canvasHeight: number): number {
+  return canvasHeight - ((gridY - 0.5) / 50) * canvasHeight
+}
+
 function layoutNodes(model: FlowchartModel, canvasWidth: number, canvasHeight: number): PixelNode[] {
-  const labels = model.nodes.map((node) => node.label).filter(Boolean)
-  if (labels.length === 0) return []
+  const nodes = model.nodes.filter((node) => node.label)
+  if (nodes.length === 0) return []
 
-  const centerY = canvasHeight / 2
-  const widths = labels.map(estimateNodeWidth)
-  const totalWidth = widths.reduce((sum, item) => sum + item, 0) + (labels.length - 1) * NODE_GAP
+  const gridUnitX = canvasWidth / 50
+  const gridUnitY = canvasHeight / 50
 
-  if (labels.length <= 4 && totalWidth <= canvasWidth - MARGIN_X * 2) {
-    let x = (canvasWidth - totalWidth) / 2
-    return labels.map((label, index) => {
-      const nodeWidth = widths[index]
-      const node = {
-        label,
-        x,
-        y: centerY - NODE_HEIGHT / 2,
-        width: nodeWidth,
-        height: NODE_HEIGHT,
-      }
-      x += nodeWidth + NODE_GAP
-      return node
-    })
-  }
-
-  const columns = Math.ceil(labels.length / 2)
-  const rows = Math.ceil(labels.length / columns)
-  const rowGap = 54
-  const maxWidth = Math.max(...widths)
-  const compactGap = Math.max(18, Math.min(NODE_GAP, (canvasWidth - MARGIN_X * 2 - columns * maxWidth) / Math.max(1, columns - 1)))
-  const gridWidth = columns * maxWidth + (columns - 1) * compactGap
-  const startX = (canvasWidth - gridWidth) / 2
-  const startY = centerY - (rows * NODE_HEIGHT + (rows - 1) * rowGap) / 2
-
-  return labels.map((label, index) => {
-    const row = Math.floor(index / columns)
-    const col = index % columns
-    const isOddLast = row === rows - 1 && labels.length % columns !== 0
-    const rowOffset = isOddLast ? (columns - (labels.length % columns)) * (maxWidth + compactGap) / 2 : 0
+  return nodes.map((node) => {
+    const width = Math.max(estimateNodeWidth(node.label), node.width * gridUnitX)
+    const height = Math.max(NODE_HEIGHT, node.height * gridUnitY)
+    const cx = gridXToPixel(node.cx, canvasWidth)
+    const cy = gridYToPixel(node.cy, canvasHeight)
 
     return {
-      label,
-      x: startX + rowOffset + col * (maxWidth + compactGap),
-      y: startY + row * (NODE_HEIGHT + rowGap),
-      width: maxWidth,
-      height: NODE_HEIGHT,
+      label: node.label,
+      x: cx - width / 2,
+      y: cy - height / 2,
+      width,
+      height,
     }
   })
 }

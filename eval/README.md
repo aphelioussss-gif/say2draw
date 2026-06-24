@@ -164,14 +164,16 @@ Suggested golden example fields:
 
 Keep generated eval data in local files during the first phase.
 
-Recommended runtime data layout for later implementation:
+Runtime traces are automatically appended to:
 
 ```text
-data/
-  traces/
-    2026-06-24.jsonl
-  eval-ratings/
-    2026-06-24.jsonl
+data/traces/YYYY-MM-DD.jsonl
+```
+
+Future human rating records should use:
+
+```text
+data/eval-ratings/YYYY-MM-DD.jsonl
 ```
 
 Each line should be one JSON object. This keeps the data readable and easy to migrate.

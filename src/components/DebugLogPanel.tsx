@@ -26,6 +26,33 @@ function entryTextColor(status: string): string {
 function EntryRow({ entry }: { entry: DebugLogEntry }) {
   const bg = entryColor(entry.status)
   const color = entryTextColor(entry.status)
+  const [ratingStatus, setRatingStatus] = useState<string>('')
+
+  async function submitRating(score: number) {
+    if (!entry.traceId) return
+    const note = window.prompt(`给这次结果打 ${score} 分。可补一句备注：`, '') || ''
+    setRatingStatus('保存中')
+    try {
+      const res = await fetch('/api/eval-rating', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          traceId: entry.traceId,
+          score,
+          note,
+          failureType: entry.failureType,
+          command: entry.command,
+          endpoint: entry.endpoint,
+          stage: entry.stage,
+        }),
+      })
+      const data = await res.json()
+      setRatingStatus(data.ok ? `已评分 ${score}` : '保存失败')
+    } catch {
+      setRatingStatus('保存失败')
+    }
+  }
+
   return (
     <div
       style={{
@@ -102,9 +129,35 @@ function EntryRow({ entry }: { entry: DebugLogEntry }) {
       )}
       {entry.endpoint && (
         <div style={{ marginTop: 1, opacity: 0.5, fontSize: 11 }}>
-          {entry.endpoint}
+          {entry.endpoint}{entry.traceId ? ` · ${entry.traceId}` : ''}
         </div>
       )}
+      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, opacity: 0.7 }}>人工评分:</span>
+        {[0, 1, 2, 3, 4].map((score) => (
+          <button
+            key={score}
+            onClick={() => submitRating(score)}
+            disabled={!entry.traceId || ratingStatus.startsWith('已评分')}
+            style={{
+              padding: '2px 7px',
+              borderRadius: 4,
+              border: '1px solid rgba(0,0,0,0.16)',
+              background: entry.traceId ? '#fff' : 'rgba(255,255,255,0.5)',
+              color,
+              cursor: entry.traceId ? 'pointer' : 'not-allowed',
+              fontSize: 11,
+              fontWeight: 700,
+            }}
+            title={entry.traceId ? '保存人工评分' : '这条日志没有 traceId，不能评分'}
+          >
+            {score}
+          </button>
+        ))}
+        {ratingStatus && (
+          <span style={{ fontSize: 11, opacity: 0.75 }}>{ratingStatus}</span>
+        )}
+      </div>
     </div>
   )
 }
@@ -119,7 +172,7 @@ export default function DebugLogPanel() {
     const text = entries
       .map(
         (e) =>
-          `[${e.time}] ${e.stage} / ${e.status}${e.failureType ? ` [${e.failureType}]` : ''} | ${e.command}${e.warning ? ` | warning: ${e.warning}` : ''}${e.error ? ` | error: ${e.error}` : ''}`,
+          `[${e.time}] ${e.stage} / ${e.status}${e.failureType ? ` [${e.failureType}]` : ''}${e.traceId ? ` | traceId: ${e.traceId}` : ''} | ${e.command}${e.warning ? ` | warning: ${e.warning}` : ''}${e.error ? ` | error: ${e.error}` : ''}`,
       )
       .join('\n')
     navigator.clipboard.writeText(text).catch(() => {})

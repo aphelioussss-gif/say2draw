@@ -163,15 +163,40 @@ function inferTraceStatus(body: unknown): string {
   return 'success'
 }
 
-function writeTraceRecord(record: JsonRecord): void {
+function writeJsonlRecord(subdir: string, record: JsonRecord): void {
   try {
     const date = formatBeijingDate()
-    const dir = resolve(__dirname, '../data/traces')
+    const dir = resolve(__dirname, `../data/${subdir}`)
     mkdirSync(dir, { recursive: true })
     appendFileSync(resolve(dir, `${date}.jsonl`), `${JSON.stringify(record)}\n`, 'utf-8')
   } catch (error) {
-    console.warn('[TraceLog] Failed to write trace:', error)
+    console.warn(`[${subdir}] Failed to write record:`, error)
   }
+}
+
+function writeTraceRecord(record: JsonRecord): void {
+  writeJsonlRecord('traces', record)
+}
+
+function createEvalId(date = new Date()): string {
+  const day = formatBeijingDate(date).replace(/-/g, '')
+  const suffix = Math.random().toString(36).slice(2, 8)
+  return `E-${day}-${date.getTime()}-${suffix}`
+}
+
+function inferEvalDecision(score: number): string {
+  if (score <= 2) return 'failure_review'
+  if (score >= 3) return 'golden_candidate'
+  return 'no_action'
+}
+
+function inferImprovementTarget(score: number, requestedTarget: unknown, stage: unknown): string {
+  if (typeof requestedTarget === 'string' && requestedTarget.trim()) return requestedTarget.trim()
+  if (score >= 3) return 'golden_example'
+  if (stage === 'plan') return 'planner'
+  if (stage === 'plan-revise') return 'patch_workflow'
+  if (stage === 'flowchart-edit' || stage === 'sketch') return 'renderer'
+  return 'none'
 }
 
 app.use((req, res, next) => {
@@ -2718,6 +2743,40 @@ app.post('/api/parse-command', async (req, res) => {
     console.error('[Parse] API error:', error)
     return res.json({ ok: false, error: String(error).slice(0, 200) })
   }
+})
+
+/**
+ * POST /api/eval-rating
+ * Persist a human 0-4 eval rating linked to a traceId.
+ */
+app.post('/api/eval-rating', (req, res) => {
+  const { traceId, score, note, failureType, improvementTarget, command, endpoint, stage } = req.body
+
+  if (!traceId || typeof traceId !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Missing traceId parameter' })
+  }
+
+  if (!Number.isInteger(score) || score < 0 || score > 4) {
+    return res.status(400).json({ ok: false, error: 'Score must be an integer from 0 to 4' })
+  }
+
+  const evalId = createEvalId()
+  const record = {
+    evalId,
+    traceId,
+    createdAt: formatBeijingIso(),
+    input: typeof command === 'string' ? command : null,
+    endpoint: typeof endpoint === 'string' ? endpoint : null,
+    stage: typeof stage === 'string' ? stage : null,
+    score,
+    note: typeof note === 'string' ? note : '',
+    failureType: typeof failureType === 'string' ? failureType : undefined,
+    decision: inferEvalDecision(score),
+    improvementTarget: inferImprovementTarget(score, improvementTarget, stage),
+  }
+
+  writeJsonlRecord('eval-ratings', record)
+  return res.json({ ok: true, rating: record })
 })
 
 /**

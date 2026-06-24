@@ -170,13 +170,13 @@ Runtime traces are automatically appended to:
 data/traces/YYYY-MM-DD.jsonl
 ```
 
-Future human rating records should use:
+Human rating records are appended by `POST /api/eval-rating` to:
 
 ```text
 data/eval-ratings/YYYY-MM-DD.jsonl
 ```
 
-Each line should be one JSON object. This keeps the data readable and easy to migrate.
+The Debug Log panel sends scores from 0 to 4 for trace-backed entries. Each line is one JSON object, which keeps the data readable and easy to migrate.
 
 ## Future migration
 

@@ -10,6 +10,7 @@ import { ConfigPage } from './components/ConfigPage'
 import { VoiceStatusBar } from './components/VoiceStatusBar'
 import { ModePresetPanel } from './components/ModePresetPanel'
 import { FeedbackPanel } from './components/FeedbackPanel'
+import { VoiceGuidePanel } from './components/VoiceGuidePanel'
 import { getActionFeedback, getBatchFeedback, type FeedbackState } from './domain/feedback'
 import {
   drawingReducer,
@@ -1509,6 +1510,7 @@ function App() {
 
         <aside className="context-panel" aria-label="Context panel">
           <PlanCompanion plan={pendingPlan} />
+          <VoiceGuidePanel hasPendingPlan={pendingPlan !== null} hasSketch={sketchStrokes.length > 0 || !!sketchMode?.flowchartModel} />
           <ModePresetPanel mode={activeMode} />
           <FeedbackPanel feedback={feedback} />
           {showDevInput ? (

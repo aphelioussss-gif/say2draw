@@ -576,6 +576,55 @@
   line-height: 1.45;
 }
 
+/* ---- Voice Guide Panel ---- */
+
+.voice-guide-panel {
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-sm);
+}
+
+.voice-guide-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.voice-guide-header h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.voice-guide-desc {
+  margin: 8px 0 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.voice-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-guide-chip {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--bg-app);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* ---- Mode Preset Panel ---- */
 
 .mode-preset-panel {

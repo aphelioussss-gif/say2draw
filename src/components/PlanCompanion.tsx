@@ -76,8 +76,8 @@ export function PlanCompanion({ plan }: PlanCompanionProps) {
       <div className="plan-section">
         <p className="label">关键元素</p>
         <div className="plan-elements">
-          {plan.elements.map((element) => (
-            <article className="plan-element" key={`${element.name}-${element.position}`}>
+          {plan.elements.map((element, index) => (
+            <article className="plan-element" key={`${element.name}-${element.position}-${index}`}>
               <span
                 className="plan-color"
                 style={{ background: element.color }}
@@ -101,8 +101,8 @@ export function PlanCompanion({ plan }: PlanCompanionProps) {
         <div className="plan-section">
           <p className="label">连接 / 流向</p>
           <div className="plan-connections">
-            {plan.connections.map((conn) => (
-              <span key={`${conn.from}-${conn.to}`}>
+            {plan.connections.map((conn, index) => (
+              <span key={`${conn.from}-${conn.to}-${index}`}>
                 {conn.from} {conn.direction} {conn.to}
               </span>
             ))}
@@ -113,8 +113,8 @@ export function PlanCompanion({ plan }: PlanCompanionProps) {
       <div className="plan-section">
         <p className="label">绘制顺序</p>
         <ol className="plan-order">
-          {order.map((item) => (
-            <li key={item}>{item}</li>
+          {order.map((item, index) => (
+            <li key={`${item}-${index}`}>{item}</li>
           ))}
         </ol>
       </div>

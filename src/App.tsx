@@ -524,6 +524,7 @@ function App() {
           stage: 'plan',
           status: data.warning && !/deterministic/.test(data.warning) ? 'fallback' : 'success',
           endpoint: '/api/sketch-plan',
+          traceId: data.traceId,
           outputSummary: summarisePlan(data.plan),
           warning: data.warning || undefined,
         })
@@ -549,6 +550,7 @@ function App() {
         stage: 'plan',
         status: 'error',
         endpoint: '/api/sketch-plan',
+        traceId: data.traceId,
         failureType: 'intent_recognition',
         outputSummary: 'plan 返回无效',
       })
@@ -608,6 +610,7 @@ function App() {
           stage: 'plan-revise',
           status: data.warning ? 'fallback' : 'success',
           endpoint: '/api/sketch-plan/revise',
+          traceId: data.traceId,
           warning: data.warning || undefined,
           outputSummary: summarisePlan(data.plan),
         })
@@ -625,6 +628,7 @@ function App() {
         stage: 'plan-revise',
         status: 'error',
         endpoint: '/api/sketch-plan/revise',
+        traceId: data.traceId,
         failureType: 'intent_recognition',
         error: 'revision returned invalid plan',
       })
@@ -691,6 +695,7 @@ function App() {
             stage: 'sketch',
             status: data.warning && !/deterministic/.test(data.warning) ? 'fallback' : 'success',
             endpoint: '/api/sketch',
+            traceId: data.traceId,
             outputSummary: `sketch: ${parsed.concept} (${parsed.strokes.length} 笔触, ${labelCount} 节点, plan ${planElementCount} 元素)`,
             warning: elementMismatch ? `计划有 ${planElementCount} 个元素，但只渲染了 ${labelCount} 个节点` : (data.warning || undefined),
           })
@@ -726,6 +731,7 @@ function App() {
         stage: 'sketch',
         status: data.warning && !/deterministic/.test(data.warning) ? 'fallback' : 'error',
         endpoint: '/api/sketch',
+        traceId: data.traceId,
         warning: data.warning || undefined,
         error: data.error || 'no sketch returned',
       })
@@ -801,6 +807,7 @@ function App() {
             stage: 'flowchart-edit',
             status: 'success',
             endpoint: '/api/sketch-flowchart-edit',
+            traceId: data.traceId,
             inputSummary: summarisePlan(sketchMode.approvedPlan),
             outputSummary: feedbackMsg,
             durationMs: Math.round(performance.now() - startedAt),
@@ -817,6 +824,7 @@ function App() {
         stage: 'flowchart-edit',
         status: 'error',
         endpoint: '/api/sketch-flowchart-edit',
+        traceId: data.traceId,
         failureType: 'invalid_format',
         inputSummary: summarisePlan(sketchMode.approvedPlan),
         error: data.error || 'no drawable flowchart returned',

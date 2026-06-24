@@ -37,6 +37,7 @@ export type DebugLogEntry = {
   stage: DebugLogStage
   status: DebugLogStatus
   endpoint?: string
+  traceId?: string
   failureType?: DebugFailureType
   inputSummary?: string
   outputSummary?: string

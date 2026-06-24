@@ -135,6 +135,10 @@ function buildTranscriptReviewMessage(review: TranscriptReview): string {
   return `我听到：${review.originalText}。这句可能没听清，说确认继续，或说重说。`
 }
 
+function isFlowchartEditInstruction(text: string): boolean {
+  return /宽松|太窄|太挤|散开|间距|文字居中|框太小|框压字|格子不对|不对|箭头|对齐|排版|重新排版|那里|添加|增加|新增|插入|加入|加上|去掉|删除|移除|不要|改为|改成|换成|变成|放到|放在|移到|移动到|移至/.test(text)
+}
+
 function getSketchPixelBounds(strokes: ControlPoint[][]) {
   let minX = Number.POSITIVE_INFINITY
   let minY = Number.POSITIVE_INFINITY
@@ -778,6 +782,7 @@ function App() {
           setSketchMode((prev) => prev ? {
             ...prev,
             rawStrokes: parsed.strokes,
+            approvedPlan: data.plan ? { ...data.plan, originalText: prev.approvedPlan?.originalText || instruction } : prev.approvedPlan,
             flowchartModel: data.model || prev.flowchartModel,
             flowchartTransform: data.model ? (prev.flowchartTransform || { dx: 0, dy: 0, scale: 1 }) : prev.flowchartTransform,
           } : null)
@@ -1016,7 +1021,7 @@ function App() {
         return
       }
 
-      if (/宽松|太窄|太挤|散开|间距|文字居中|框太小|框压字|格子不对|不对|箭头|对齐|排版|重新排版|那里/.test(transcript) && sketchMode.approvedPlan?.intentType === 'flowchart') {
+      if (isFlowchartEditInstruction(transcript) && sketchMode.approvedPlan?.intentType === 'flowchart') {
         handleFlowchartLayoutAdjust(transcript)
         return
       }
@@ -1237,17 +1242,8 @@ function App() {
         }
 
         // 3a. Flowchart layout adjustments — LLM understands intent, code renders deterministically
-        if (/宽松|太窄|太挤|散开|间距|文字居中|框太小|框压字|格子不对|不对|箭头|对齐|排版|重新排版|那里/.test(trimmed)) {
+        if (isFlowchartEditInstruction(trimmed)) {
           if (sketchMode.approvedPlan?.intentType === 'flowchart') {
-            if (llmStatus !== 'configured') {
-              updateFeedback({ result: 'LLM Key 未配置', status: 'error', suggestion: '请先在设置页配置 LLM Key，或说"往右一点""放大"等简单调整' })
-              speechFeedback.speak('这个调整需要先配置 LLM Key。你可以先试试说"往右一点""放大""改颜色"。', {
-                onEnd: () => {
-                  if (!speech.isManuallyPausedRef.current) speech.resumeListening()
-                },
-              })
-              return
-            }
             handleFlowchartLayoutAdjust(transcript)
             return
           }
